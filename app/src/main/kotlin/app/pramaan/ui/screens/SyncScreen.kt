@@ -1,5 +1,6 @@
 package app.pramaan.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,16 +21,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -44,13 +51,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.pramaan.AppContainer
 import app.pramaan.core.model.Badge
-import app.pramaan.data.SessionEntity
 import app.pramaan.ui.components.BadgeChip
 import app.pramaan.ui.components.PramaanButton
 import app.pramaan.ui.components.PramaanCard
+import app.pramaan.ui.components.QrScanner
 import app.pramaan.ui.theme.PramaanEmerald
 import app.pramaan.ui.theme.PramaanError
 import app.pramaan.ui.theme.PramaanOnSurface
@@ -70,8 +78,18 @@ fun SyncScreen(
     onNavigateToResult: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var serverUrl by remember { mutableStateOf("http://10.0.2.2:8080") }
+    val prefs = remember { context.getSharedPreferences("pramaan_prefs", Context.MODE_PRIVATE) }
+
+    var serverUrl by remember {
+        mutableStateOf(prefs.getString("server_url", "") ?: "")
+    }
+
+    var isScanningQr by remember { mutableStateOf(false) }
+    var isTestingConnection by remember { mutableStateOf(false) }
+    var connectionTestResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+
     var isSyncing by remember { mutableStateOf(false) }
     var syncStatusText by remember { mutableStateOf<String?>(null) }
     var syncErrorMessage by remember { mutableStateOf<String?>(null) }
@@ -81,8 +99,40 @@ fun SyncScreen(
 
     val pendingCount = sessions.count { !it.synced }
 
+    fun saveUrl(url: String) {
+        val clean = url.trim()
+        serverUrl = clean
+        prefs.edit().putString("server_url", clean).apply()
+    }
+
+    fun testConnection() {
+        if (serverUrl.isBlank()) {
+            connectionTestResult = false to "Please scan the server QR code or enter a URL first."
+            return
+        }
+        isTestingConnection = true
+        connectionTestResult = null
+        scope.launch {
+            val res = withContext(Dispatchers.IO) {
+                container.syncClient.testConnection(serverUrl)
+            }
+            isTestingConnection = false
+            if (res.isSuccess) {
+                connectionTestResult = true to (res.getOrNull() ?: "Connected successfully!")
+            } else {
+                val err = res.exceptionOrNull()?.localizedMessage ?: "Unknown connection error"
+                connectionTestResult = false to "Cannot reach server at $serverUrl.\n\nTroubleshooting:\n1. Ensure laptop and phone are on the same Wi-Fi or Mobile Hotspot.\n2. Run allow-firewall.bat on your laptop to allow port 8080.\n\nError details: $err"
+            }
+        }
+    }
+
     fun syncAll() {
         if (isSyncing) return
+        if (serverUrl.isBlank()) {
+            syncErrorMessage = "Please scan the pairing QR from your laptop or enter the server URL."
+            return
+        }
+
         isSyncing = true
         syncStatusText = "Connecting to verification server..."
         syncErrorMessage = null
@@ -100,14 +150,12 @@ fun SyncScreen(
 
                     if (res != null) {
                         successCount++
-                        // Update Room DB
                         container.sessionDao.update(
                             sess.copy(
                                 badge = res.serverBadge.name,
                                 synced = true
                             )
                         )
-                        // Save certificate if present
                         res.certificate?.let { certJws ->
                             val certFile = container.sessionStore.getCertFile(sess.id)
                             certFile.writeText(certJws)
@@ -119,9 +167,44 @@ fun SyncScreen(
                 isSyncing = false
             } catch (e: Exception) {
                 isSyncing = false
-                syncErrorMessage = "Sync failed: ${e.message}"
+                syncErrorMessage = "Sync failed: ${e.message}\nMake sure your laptop server is running and port 8080 is allowed through Windows Firewall."
             }
         }
+    }
+
+    if (isScanningQr) {
+        // Fullscreen QR scanner to pair phone with laptop dashboard QR code
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Scan Server Pairing QR", style = PramaanTypography.titleMedium) },
+                    navigationIcon = {
+                        IconButton(onClick = { isScanningQr = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
+        ) { pad ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(pad)
+            ) {
+                QrScanner(
+                    onQrScanned = { scanned ->
+                        val url = scanned.trim()
+                        if (url.startsWith("http://") || url.startsWith("https://")) {
+                            saveUrl(url)
+                            isScanningQr = false
+                            testConnection()
+                        }
+                    }
+                )
+            }
+        }
+        return
     }
 
     Scaffold(
@@ -167,33 +250,50 @@ fun SyncScreen(
             // Server Config Card
             item {
                 PramaanCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFEEF2FF)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Dns,
-                                contentDescription = null,
-                                tint = Color(0xFF4F46E5),
-                                modifier = Modifier.size(20.dp)
-                            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEEF2FF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Dns,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4F46E5),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Verification Server",
+                                    style = PramaanTypography.titleMedium,
+                                    color = PramaanOnSurface
+                                )
+                                Text(
+                                    text = "Laptop or central authority",
+                                    style = PramaanTypography.labelSmall,
+                                    color = PramaanOutline
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Verification Server",
-                                style = PramaanTypography.titleMedium,
-                                color = PramaanOnSurface
-                            )
-                            Text(
-                                text = "Independent laptop or cloud authority",
-                                style = PramaanTypography.labelSmall,
-                                color = PramaanOutline
-                            )
+
+                        // Button to scan server QR from laptop screen
+                        Button(
+                            onClick = { isScanningQr = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = PramaanSaffron),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Scan QR", style = PramaanTypography.labelSmall)
                         }
                     }
 
@@ -201,11 +301,57 @@ fun SyncScreen(
 
                     OutlinedTextField(
                         value = serverUrl,
-                        onValueChange = { serverUrl = it },
-                        label = { Text("Server Endpoint URL") },
+                        onValueChange = { saveUrl(it) },
+                        label = { Text("Server Endpoint URL (e.g. http://192.168.1.5:8080)") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = { testConnection() },
+                            enabled = !isTestingConnection && serverUrl.isNotBlank(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Sensors, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isTestingConnection) "Testing..." else "Test Connection",
+                                style = PramaanTypography.labelSmall
+                            )
+                        }
+                    }
+
+                    connectionTestResult?.let { (success, message) ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (success) Color(0xFFDCFCE7) else Color(0xFFFEE2E2))
+                                .padding(12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    imageVector = if (success) Icons.Default.CheckCircle else Icons.Default.Error,
+                                    contentDescription = null,
+                                    tint = if (success) PramaanEmerald else PramaanError,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = message,
+                                    style = PramaanTypography.bodySmall,
+                                    color = if (success) Color(0xFF14532D) else Color(0xFF7F1D1D)
+                                )
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(14.dp))
 

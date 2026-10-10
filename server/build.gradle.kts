@@ -30,6 +30,7 @@ dependencies {
 
     implementation(libs.nimbus.jose.jwt)
     implementation(libs.kotlinx.html.jvm)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotest.assertions.core)

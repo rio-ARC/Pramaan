@@ -42,5 +42,7 @@ Thumbs.db
 # Server specific
 server/keys/
 server/data/
-pramaan.db
+data/
 *.db
+server_key.json
+server/server_key.json

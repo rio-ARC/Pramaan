@@ -7,15 +7,18 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 @Serializable
 data class SyncResponse(
@@ -32,6 +35,30 @@ class SyncClient(private val sessionStore: SessionStore) {
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) {
             json(json)
+        }
+        engine {
+            config {
+                connectTimeout(5, TimeUnit.SECONDS)
+                readTimeout(60, TimeUnit.SECONDS)
+                writeTimeout(60, TimeUnit.SECONDS)
+            }
+        }
+    }
+
+    suspend fun testConnection(serverUrl: String): Result<String> {
+        return try {
+            val cleanUrl = serverUrl.trimEnd('/')
+            if (cleanUrl.isBlank() || !cleanUrl.startsWith("http")) {
+                return Result.failure(IllegalArgumentException("Please enter a valid URL starting with http://"))
+            }
+            val response = client.get("$cleanUrl/api/health")
+            if (response.status == HttpStatusCode.OK) {
+                Result.success("Connected to Pramaan Verification Authority")
+            } else {
+                Result.failure(Exception("Server responded with HTTP ${response.status.value}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

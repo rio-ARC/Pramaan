@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileWriter
 import java.io.PrintWriter
+import java.util.concurrent.ConcurrentHashMap
 
 class PoseEngine(
     private val context: Context,
@@ -34,6 +35,14 @@ class PoseEngine(
     private var framesWriter: PrintWriter? = null
     private val recordedFrames = mutableListOf<PoseFrame>()
     private var isRecording = false
+
+    // Thread-safe map tracking exact nanosecond timestamps across async MediaPipe calls
+    private val timestampMap = ConcurrentHashMap<Long, Long>()
+
+    // Measured FPS tracking
+    private var recentFrameTimestamps = ArrayDeque<Long>()
+    var measuredFps: Int = 30
+        private set
 
     init {
         setupLandmarker()
@@ -62,8 +71,6 @@ class PoseEngine(
         }
     }
 
-    private var currentFrameTimestampNs: Long = 0L
-
     @OptIn(ExperimentalGetImage::class)
     fun processCameraFrame(imageProxy: ImageProxy) {
         val landmarkerInstance = landmarker ?: run {
@@ -72,8 +79,14 @@ class PoseEngine(
         }
 
         val timestampNs = imageProxy.imageInfo.timestamp
-        currentFrameTimestampNs = timestampNs
         val timestampMs = timestampNs / 1_000_000L
+        timestampMap[timestampMs] = timestampNs
+
+        // Keep timestampMap bounded
+        if (timestampMap.size > 100) {
+            val oldest = timestampMap.keys.minOrNull()
+            if (oldest != null) timestampMap.remove(oldest)
+        }
 
         try {
             val bitmap = imageProxy.toBitmap()
@@ -96,6 +109,26 @@ class PoseEngine(
     }
 
     private fun handleResult(result: PoseLandmarkerResult) {
+        val timestampMs = result.timestampMs()
+        val timestampNs = timestampMap.remove(timestampMs) ?: (timestampMs * 1_000_000L)
+
+        // Update measured FPS
+        synchronized(recentFrameTimestamps) {
+            recentFrameTimestamps.addLast(timestampNs)
+            while (recentFrameTimestamps.size > 30) {
+                recentFrameTimestamps.removeFirst()
+            }
+            if (recentFrameTimestamps.size >= 5) {
+                val dtSec = (recentFrameTimestamps.last() - recentFrameTimestamps.first()) / 1_000_000_000.0
+                if (dtSec > 0.05) {
+                    val currentRate = Math.round((recentFrameTimestamps.size - 1) / dtSec).toInt()
+                    if (currentRate in 10..120) {
+                        measuredFps = currentRate
+                    }
+                }
+            }
+        }
+
         val landmarksList = result.landmarks()
         val landmarks = if (landmarksList.isNotEmpty() && landmarksList[0].size >= 33) {
             landmarksList[0].map { lm ->
@@ -107,7 +140,7 @@ class PoseEngine(
         }
 
         if (landmarks.size == 33) {
-            val frame = PoseFrame(t = currentFrameTimestampNs, landmarks = landmarks)
+            val frame = PoseFrame(t = timestampNs, landmarks = landmarks)
             scope.launch {
                 onPoseFrame?.invoke(frame)
                 if (isRecording) {

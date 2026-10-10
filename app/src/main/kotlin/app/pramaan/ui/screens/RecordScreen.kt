@@ -2,9 +2,6 @@ package app.pramaan.ui.screens
 
 import android.os.SystemClock
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -26,10 +23,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.MilitaryTech
-import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Sports
 import androidx.compose.material.icons.filled.StopCircle
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -57,18 +52,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.pramaan.AppContainer
-import app.pramaan.core.manifest.GyroJsonl
-import app.pramaan.core.model.GyroSample
 import app.pramaan.core.model.PoseFrame
 import app.pramaan.core.model.TestType
 import app.pramaan.core.scoring.SitUpAnalyzer
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
 import app.pramaan.data.AthleteEntity
+import app.pramaan.ui.components.CameraPermissionGate
 import app.pramaan.ui.components.PramaanButton
 import app.pramaan.ui.components.SkeletonOverlay
 import app.pramaan.ui.theme.PramaanEmerald
 import app.pramaan.ui.theme.PramaanOnSurface
-import app.pramaan.ui.theme.PramaanOnSurfaceVariant
 import app.pramaan.ui.theme.PramaanOutline
 import app.pramaan.ui.theme.PramaanSaffron
 import app.pramaan.ui.theme.PramaanSurface
@@ -77,12 +70,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.FileWriter
-import java.io.PrintWriter
+import java.io.File
 import java.util.UUID
 
 @Composable
 fun RecordScreen(
+    athleteId: String,
+    testType: TestType,
+    container: AppContainer,
+    onFinished: (sessionId: String) -> Unit,
+    onBack: () -> Unit
+) {
+    CameraPermissionGate(purpose = "capturing exercise movement and recording verification video") {
+        RecordContent(
+            athleteId = athleteId,
+            testType = testType,
+            container = container,
+            onFinished = onFinished,
+            onBack = onBack
+        )
+    }
+}
+
+@Composable
+private fun RecordContent(
     athleteId: String,
     testType: TestType,
     container: AppContainer,
@@ -111,6 +122,7 @@ fun RecordScreen(
 
     // Recent frames buffer for scoring
     val frameBuffer = remember { mutableStateListOf<PoseFrame>() }
+    var frameCounter by remember { mutableIntStateOf(0) }
 
     // Load athlete record
     LaunchedEffect(athleteId) {
@@ -132,14 +144,14 @@ fun RecordScreen(
         }
     }
 
-    // Session recording lifecycle (Camera, Gyro, Pose)
+    val videoFile = remember(sessionId) { container.sessionStore.getVideoFile(sessionId) }
+    val framesFile = remember(sessionId) { container.sessionStore.getFramesFile(sessionId) }
+    val gyroFile = remember(sessionId) { container.sessionStore.getGyroFile(sessionId) }
+
+    // Setup lifecycle cleanup
     DisposableEffect(sessionId) {
         val sessionDir = container.sessionStore.getSessionDir(sessionId)
         sessionDir.mkdirs()
-
-        val videoFile = container.sessionStore.getVideoFile(sessionId)
-        val framesFile = container.sessionStore.getFramesFile(sessionId)
-        val gyroFile = container.sessionStore.getGyroFile(sessionId)
 
         // Start gyro recording
         container.gyroRecorder.startRecording()
@@ -151,37 +163,36 @@ fun RecordScreen(
             frameBuffer.add(frame)
             if (frameBuffer.size > 180) frameBuffer.removeAt(0)
 
-            // Real-time analysis pass
-            val ath = athlete
-            if (ath != null) {
-                if (testType == TestType.VERTICAL_JUMP) {
-                    val result = VerticalJumpAnalyzer.analyze(frameBuffer.toList(), ath.heightCm)
-                    if (result.attempts.isNotEmpty()) {
-                        val lastAtt = result.attempts.last()
-                        provisionalMetric = Math.round(lastAtt.flightCm * 10.0) / 10.0
-                        if (provisionalMetric > bestBenchmark) {
-                            bestBenchmark = provisionalMetric
+            frameCounter++
+            // Throttle scoring evaluation to every 3 frames for smooth UI rendering
+            if (frameCounter % 3 == 0) {
+                val ath = athlete
+                if (ath != null) {
+                    if (testType == TestType.VERTICAL_JUMP) {
+                        val result = VerticalJumpAnalyzer.analyze(frameBuffer.toList(), ath.heightCm)
+                        if (result.attempts.isNotEmpty()) {
+                            val lastAtt = result.attempts.last()
+                            provisionalMetric = Math.round(lastAtt.flightCm * 10.0) / 10.0
+                            if (provisionalMetric > bestBenchmark) {
+                                bestBenchmark = provisionalMetric
+                            }
+                            toastText = "Take-off Detected • Apex ${provisionalMetric} cm"
+                            liveFeedback = "Depth good, full extension on landing"
                         }
-                        toastText = "Take-off Detected • Apex ${provisionalMetric} cm"
-                        liveFeedback = "Depth good, full extension on landing"
+                    } else if (testType == TestType.SIT_UPS) {
+                        val result = SitUpAnalyzer.analyze(frameBuffer.toList())
+                        provisionalMetric = result.totalReps.toDouble()
+                        bestBenchmark = provisionalMetric
+                        toastText = "Rep ${result.totalReps} • Flexion Valid"
+                        liveFeedback = "Rep valid: flexed > 70°"
                     }
-                } else if (testType == TestType.SIT_UPS) {
-                    val result = SitUpAnalyzer.analyze(frameBuffer.toList())
-                    provisionalMetric = result.totalReps.toDouble()
-                    bestBenchmark = provisionalMetric
-                    toastText = "Rep ${result.totalReps} • Flexion Valid"
-                    liveFeedback = "Rep valid: flexed > 70°"
                 }
             }
         }
 
-        // Start video capture
-        container.cameraController.startRecording(videoFile) { }
-        isRunning = true
-
         onDispose {
             isRunning = false
-            container.cameraController.stopRecording()
+            container.cameraController.unbind()
             container.poseEngine.stopRecording()
             container.gyroRecorder.stopRecording(gyroFile)
         }
@@ -194,9 +205,9 @@ fun RecordScreen(
 
         scope.launch {
             withContext(Dispatchers.IO) {
-                container.cameraController.stopRecording()
+                // Wait for CameraX to completely flush and finalize the MP4 file
+                container.cameraController.stopAndAwaitFinalize()
                 container.poseEngine.stopRecording()
-                val gyroFile = container.sessionStore.getGyroFile(sessionId)
                 container.gyroRecorder.stopRecording(gyroFile)
 
                 val ath = athlete ?: AthleteEntity(
@@ -210,11 +221,12 @@ fun RecordScreen(
                     guardianConsent = true
                 )
 
+                val fps = container.poseEngine.measuredFps
                 container.sealer.sealSession(
                     sessionId = sessionId,
                     testType = testType,
                     athlete = ath,
-                    fps = 30
+                    fps = fps
                 )
             }
             onFinished(sessionId)
@@ -245,7 +257,13 @@ fun RecordScreen(
                         PreviewView(ctx).apply {
                             container.cameraController.bindCamera(
                                 lifecycleOwner = lifecycleOwner,
-                                previewView = this
+                                previewView = this,
+                                onBound = { success ->
+                                    if (success) {
+                                        container.cameraController.startRecording(videoFile)
+                                        isRunning = true
+                                    }
+                                }
                             )
                         }
                     }
@@ -432,7 +450,8 @@ fun RecordScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(Color(0xFFDCFCE7))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "LIVE",

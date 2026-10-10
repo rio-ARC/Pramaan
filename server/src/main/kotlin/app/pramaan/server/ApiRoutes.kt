@@ -35,15 +35,36 @@ data class ServerSyncResponse(
     val certificate: String? = null
 )
 
+@Serializable
+data class HealthStatusResponse(
+    val status: String = "OK",
+    val service: String = "PRAMAAN_VERIFICATION_SERVER",
+    val version: String = "1.0",
+    val timestamp: Long = 0L
+)
+
 fun Route.configureRoutes(
     certificateIssuer: ServerCertificateIssuer,
-    uploadsDir: File = File("uploads").apply { if (!exists()) mkdirs() }
+    uploadsDir: File = File("uploads").apply { if (!exists()) mkdirs() },
+    lanIp: String = "127.0.0.1"
 ) {
+    // 0. Health check endpoint for pairing diagnostic
+    get("/api/health") {
+        call.respond(
+            HealthStatusResponse(
+                status = "OK",
+                service = "PRAMAAN_VERIFICATION_SERVER",
+                version = "1.0",
+                timestamp = System.currentTimeMillis()
+            )
+        )
+    }
+
     // 1. Dashboard UI
     get("/") {
         val sessions = ServerDb.getAll()
         call.respondHtml {
-            renderDashboard(sessions)
+            renderDashboard(sessions, lanIp)
         }
     }
 

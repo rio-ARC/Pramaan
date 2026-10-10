@@ -1,10 +1,13 @@
 package app.pramaan.server
 
 import app.pramaan.core.model.Badge
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.nimbusds.jwt.JWTClaimsSet
 import kotlinx.html.HTML
 import kotlinx.html.a
 import kotlinx.html.body
+import kotlinx.html.code
 import kotlinx.html.div
 import kotlinx.html.h1
 import kotlinx.html.h2
@@ -14,7 +17,6 @@ import kotlinx.html.header
 import kotlinx.html.link
 import kotlinx.html.meta
 import kotlinx.html.p
-import kotlinx.html.script
 import kotlinx.html.span
 import kotlinx.html.style
 import kotlinx.html.table
@@ -28,7 +30,33 @@ import kotlinx.html.unsafe
 
 object DashboardPages {
 
-    fun HTML.renderDashboard(sessions: List<ServerSessionRecord>) {
+    fun generateQrSvg(content: String, size: Int = 140): String {
+        return try {
+            val writer = QRCodeWriter()
+            val matrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)
+            val width = matrix.width
+            val height = matrix.height
+            val sb = StringBuilder()
+            sb.append("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 $width $height" width="$size" height="$size" shape-rendering="crispEdges">""")
+            sb.append("""<rect width="100%" height="100%" fill="#ffffff"/>""")
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    if (matrix.get(x, y)) {
+                        sb.append("""<rect x="$x" y="$y" width="1" height="1" fill="#131B2E"/>""")
+                    }
+                }
+            }
+            sb.append("</svg>")
+            sb.toString()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun HTML.renderDashboard(sessions: List<ServerSessionRecord>, lanIp: String = "127.0.0.1") {
+        val serverUrl = "http://$lanIp:8080"
+        val qrSvg = generateQrSvg(serverUrl, 140)
+
         head {
             title { +"Pramaan • Sports Talent Verification Authority" }
             meta(charset = "utf-8")
@@ -49,10 +77,19 @@ object DashboardPages {
                         .title-block h1 { font-size: 26px; font-weight: 700; color: #131B2E; letter-spacing: -0.5px; }
                         .title-block p { font-size: 13px; color: #64748B; font-weight: 500; }
                         .live-pill { display: inline-flex; align-items: center; gap: 6px; background: #DCFCE7; color: #16A34A; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+                        
+                        .pair-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; background: white; border: 2px solid #EA580C; border-radius: 16px; padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(234, 88, 12, 0.08); flex-wrap: wrap; }
+                        .pair-info { max-width: 650px; }
+                        .pair-info h2 { font-size: 18px; font-weight: 700; color: #131B2E; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+                        .pair-info p { font-size: 14px; color: #475569; margin-bottom: 10px; }
+                        .pair-url-pill { display: inline-flex; align-items: center; gap: 8px; background: #FFF7ED; border: 1px solid #FFEDD5; padding: 6px 12px; border-radius: 8px; font-family: 'Space Grotesk', monospace; font-size: 14px; font-weight: 700; color: #EA580C; }
+                        .pair-qr { background: white; padding: 8px; border-radius: 12px; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; }
+
                         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
                         .stat-card { background: white; border-radius: 14px; padding: 18px; border: 1px solid #E2E8F0; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }
                         .stat-card h3 { font-size: 11px; text-transform: uppercase; color: #64748B; letter-spacing: 0.5px; }
                         .stat-card .val { font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700; color: #131B2E; margin-top: 4px; }
+                        
                         .table-card { background: white; border-radius: 14px; border: 1px solid #E2E8F0; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }
                         table { width: 100%; border-collapse: collapse; text-align: left; }
                         th { background: #F8FAFC; padding: 14px 16px; font-size: 11px; text-transform: uppercase; color: #64748B; letter-spacing: 0.5px; border-bottom: 1px solid #E2E8F0; }
@@ -80,7 +117,27 @@ object DashboardPages {
                         p { +"National Sports Talent Re-Audit Engine • Auto-refreshing every 5s" }
                     }
                     div(classes = "live-pill") {
-                        span { +"● SERVER RUNNING • PORT 8080" }
+                        span { +"● SERVER ACTIVE • PORT 8080" }
+                    }
+                }
+
+                // Phone Pairing Hero Card
+                div(classes = "pair-card") {
+                    div(classes = "pair-info") {
+                        h2 { +"📱 Connect Field Station Phone" }
+                        p {
+                            +"Scan this pairing QR code with your Pramaan Android app ("
+                            code { +"Sync Screen → Scan Server QR" }
+                            +") to link your phone automatically. Both devices must be on the same Wi-Fi network or Mobile Hotspot."
+                        }
+                        div(classes = "pair-url-pill") {
+                            span { +"Endpoint URL: $serverUrl" }
+                        }
+                    }
+                    if (qrSvg.isNotEmpty()) {
+                        div(classes = "pair-qr") {
+                            unsafe { raw(qrSvg) }
+                        }
                     }
                 }
 
