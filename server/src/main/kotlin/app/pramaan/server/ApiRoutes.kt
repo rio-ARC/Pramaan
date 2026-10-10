@@ -43,8 +43,20 @@ fun Route.configureRoutes(
     get("/") {
         val sessions = ServerDb.getAll()
         call.respondHtml {
-            renderDashboard(sessions)
+            renderDashboard(sessions, ServerConfig.primaryLanIp)
         }
+    }
+
+    // Health Check Endpoint
+    get("/api/health") {
+        call.respond(
+            mapOf(
+                "status" to "OK",
+                "service" to "PRAMAAN_VERIFICATION_SERVER",
+                "version" to "1.0",
+                "lanIp" to ServerConfig.primaryLanIp
+            )
+        )
     }
 
     // 2. Standalone Certificate Verification Page
@@ -87,7 +99,7 @@ fun Route.configureRoutes(
 
     // 6. REST API: Multipart Upload Session
     post("/api/sessions") {
-        val multipart = call.receiveMultipart()
+        val multipart = call.receiveMultipart(formFieldLimit = 500L * 1024 * 1024)
         val tempFolder = File(uploadsDir, "temp_${System.currentTimeMillis()}").apply { mkdirs() }
 
         var manifestBytes: ByteArray? = null

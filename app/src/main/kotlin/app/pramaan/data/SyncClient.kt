@@ -1,5 +1,6 @@
 package app.pramaan.data
 
+import android.os.SystemClock
 import app.pramaan.core.model.Badge
 import app.pramaan.core.model.CheckResult
 import io.ktor.client.HttpClient
@@ -7,15 +8,19 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 @Serializable
 data class SyncResponse(
@@ -25,18 +30,67 @@ data class SyncResponse(
     val certificate: String? = null
 )
 
+@Serializable
+data class HealthStatusResponse(
+    val status: String = "",
+    val service: String = "",
+    val version: String = "",
+    val lanIp: String? = null
+)
+
+data class HealthCheckResult(
+    val isSuccess: Boolean,
+    val latencyMs: Long,
+    val message: String
+)
+
 class SyncClient(private val sessionStore: SessionStore) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
     private val client = HttpClient(OkHttp) {
+        engine {
+            config {
+                connectTimeout(5, TimeUnit.SECONDS)
+                readTimeout(60, TimeUnit.SECONDS)
+                writeTimeout(60, TimeUnit.SECONDS)
+            }
+        }
         install(ContentNegotiation) {
             json(json)
         }
     }
 
+    suspend fun checkHealth(serverUrl: String): HealthCheckResult {
+        val cleanUrl = serverUrl.trim().trimEnd('/')
+        if (cleanUrl.isBlank()) {
+            return HealthCheckResult(false, 0, "Server URL is empty.")
+        }
+        val healthUrl = "$cleanUrl/api/health"
+        val startTime = SystemClock.elapsedRealtime()
+
+        return try {
+            withTimeout(3500L) {
+                val response = client.get(healthUrl)
+                val latency = SystemClock.elapsedRealtime() - startTime
+                if (response.status == HttpStatusCode.OK) {
+                    HealthCheckResult(true, latency, "Connected to Pramaan Server (Latency: ${latency}ms)")
+                } else {
+                    HealthCheckResult(false, latency, "Server responded with status: ${response.status}")
+                }
+            }
+        } catch (e: Exception) {
+            val latency = SystemClock.elapsedRealtime() - startTime
+            HealthCheckResult(
+                false,
+                latency,
+                "Cannot reach server at $cleanUrl (${e.message ?: "Connection timed out"}). Ensure both devices are on the same Wi-Fi or Hotspot, and run allow-firewall.bat on your laptop."
+            )
+        }
+    }
+
     suspend fun uploadSession(serverUrl: String, sessionId: String): SyncResponse? {
-        val cleanUrl = serverUrl.trimEnd('/')
+        val cleanUrl = serverUrl.trim().trimEnd('/')
         val uploadUrl = "$cleanUrl/api/sessions"
 
         val manifestFile = sessionStore.getManifestFile(sessionId)

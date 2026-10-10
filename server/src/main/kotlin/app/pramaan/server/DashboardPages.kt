@@ -1,20 +1,24 @@
 package app.pramaan.server
 
 import app.pramaan.core.model.Badge
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.nimbusds.jwt.JWTClaimsSet
 import kotlinx.html.HTML
 import kotlinx.html.a
 import kotlinx.html.body
+import kotlinx.html.button
+import kotlinx.html.code
 import kotlinx.html.div
 import kotlinx.html.h1
 import kotlinx.html.h2
 import kotlinx.html.h3
 import kotlinx.html.head
 import kotlinx.html.header
+import kotlinx.html.img
 import kotlinx.html.link
 import kotlinx.html.meta
 import kotlinx.html.p
-import kotlinx.html.script
 import kotlinx.html.span
 import kotlinx.html.style
 import kotlinx.html.table
@@ -25,10 +29,34 @@ import kotlinx.html.thead
 import kotlinx.html.title
 import kotlinx.html.tr
 import kotlinx.html.unsafe
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
+import java.util.Base64
+import javax.imageio.ImageIO
 
 object DashboardPages {
 
-    fun HTML.renderDashboard(sessions: List<ServerSessionRecord>) {
+    fun generateQrBase64(content: String, size: Int = 180): String {
+        return try {
+            val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size)
+            val image = BufferedImage(size, size, BufferedImage.TYPE_INT_RGB)
+            for (x in 0 until size) {
+                for (y in 0 until size) {
+                    image.setRGB(x, y, if (bitMatrix.get(x, y)) 0x000000 else 0xFFFFFF)
+                }
+            }
+            val baos = ByteArrayOutputStream()
+            ImageIO.write(image, "PNG", baos)
+            Base64.getEncoder().encodeToString(baos.toByteArray())
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun HTML.renderDashboard(sessions: List<ServerSessionRecord>, lanIp: String = ServerConfig.primaryLanIp) {
+        val serverUrl = "http://$lanIp:8080"
+        val qrBase64 = generateQrBase64(serverUrl, 160)
+
         head {
             title { +"Pramaan • Sports Talent Verification Authority" }
             meta(charset = "utf-8")
@@ -49,6 +77,18 @@ object DashboardPages {
                         .title-block h1 { font-size: 26px; font-weight: 700; color: #131B2E; letter-spacing: -0.5px; }
                         .title-block p { font-size: 13px; color: #64748B; font-weight: 500; }
                         .live-pill { display: inline-flex; align-items: center; gap: 6px; background: #DCFCE7; color: #16A34A; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+                        
+                        .pair-card { display: flex; align-items: center; gap: 24px; background: white; border: 1.5px solid #FFEDD5; border-radius: 16px; padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(234, 88, 12, 0.05); }
+                        .pair-qr { flex-shrink: 0; background: white; padding: 8px; border-radius: 12px; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; }
+                        .pair-info { flex: 1; }
+                        .pair-badge { display: inline-block; background: #FFF7ED; color: #EA580C; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; margin-bottom: 6px; letter-spacing: 0.5px; }
+                        .pair-info h2 { font-size: 18px; font-weight: 700; color: #131B2E; margin-bottom: 4px; }
+                        .pair-info p { font-size: 13px; color: #64748B; margin-bottom: 12px; }
+                        .url-box { display: inline-flex; align-items: center; gap: 10px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 6px 12px; }
+                        .url-box code { font-family: 'Space Grotesk', monospace; font-size: 14px; font-weight: 600; color: #0F172A; }
+                        .copy-btn { background: #EA580C; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; cursor: pointer; transition: background 0.2s; }
+                        .copy-btn:hover { background: #C2410C; }
+
                         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
                         .stat-card { background: white; border-radius: 14px; padding: 18px; border: 1px solid #E2E8F0; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }
                         .stat-card h3 { font-size: 11px; text-transform: uppercase; color: #64748B; letter-spacing: 0.5px; }
@@ -81,6 +121,33 @@ object DashboardPages {
                     }
                     div(classes = "live-pill") {
                         span { +"● SERVER RUNNING • PORT 8080" }
+                    }
+                }
+
+                // Pair Field Station Hero Card
+                div(classes = "pair-card") {
+                    div(classes = "pair-qr") {
+                        if (qrBase64.isNotEmpty()) {
+                            img(src = "data:image/png;base64,$qrBase64", alt = "Scan to Pair with Pramaan App") {
+                                attributes["width"] = "140"
+                                attributes["height"] = "140"
+                                attributes["style"] = "display: block;"
+                            }
+                        }
+                    }
+                    div(classes = "pair-info") {
+                        span(classes = "pair-badge") { +"PAIR FIELD STATION" }
+                        h2 { +"Connect Pramaan Android App" }
+                        p {
+                            unsafe { raw("Point your phone's camera at this QR code via <b>Central Server Sync → Scan Server QR</b>, or copy the endpoint URL below:") }
+                        }
+                        div(classes = "url-box") {
+                            code { +serverUrl }
+                            button(classes = "copy-btn") {
+                                attributes["onclick"] = "navigator.clipboard.writeText('$serverUrl'); this.innerText='Copied!';"
+                                +"Copy URL"
+                            }
+                        }
                     }
                 }
 

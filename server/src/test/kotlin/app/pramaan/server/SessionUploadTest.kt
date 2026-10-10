@@ -174,4 +174,11 @@ class SessionUploadTest {
         val result = SessionVerifier.verifyUploadedSession(sessionDir)
         result.outcome.badge shouldBe Badge.TAMPERED
     }
+
+    @Test
+    fun `test dashboard pairing qr generation`() {
+        val qrBase64 = DashboardPages.generateQrBase64("http://192.168.1.50:8080", 160)
+        qrBase64.isNotEmpty() shouldBe true
+    }
 }
+

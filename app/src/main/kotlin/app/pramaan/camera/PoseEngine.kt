@@ -62,7 +62,7 @@ class PoseEngine(
         }
     }
 
-    private var currentFrameTimestampNs: Long = 0L
+    private val timestampMap = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     @OptIn(ExperimentalGetImage::class)
     fun processCameraFrame(imageProxy: ImageProxy) {
@@ -72,8 +72,13 @@ class PoseEngine(
         }
 
         val timestampNs = imageProxy.imageInfo.timestamp
-        currentFrameTimestampNs = timestampNs
         val timestampMs = timestampNs / 1_000_000L
+        timestampMap[timestampMs] = timestampNs
+
+        if (timestampMap.size > 120) {
+            val oldest = timestampMap.keys().toList().minOrNull()
+            if (oldest != null) timestampMap.remove(oldest)
+        }
 
         try {
             val bitmap = imageProxy.toBitmap()
@@ -96,6 +101,9 @@ class PoseEngine(
     }
 
     private fun handleResult(result: PoseLandmarkerResult) {
+        val resultTsMs = result.timestampMs()
+        val frameTimestampNs = timestampMap.remove(resultTsMs) ?: (resultTsMs * 1_000_000L)
+
         val landmarksList = result.landmarks()
         val landmarks = if (landmarksList.isNotEmpty() && landmarksList[0].size >= 33) {
             landmarksList[0].map { lm ->
@@ -107,7 +115,7 @@ class PoseEngine(
         }
 
         if (landmarks.size == 33) {
-            val frame = PoseFrame(t = currentFrameTimestampNs, landmarks = landmarks)
+            val frame = PoseFrame(t = frameTimestampNs, landmarks = landmarks)
             scope.launch {
                 onPoseFrame?.invoke(frame)
                 if (isRecording) {

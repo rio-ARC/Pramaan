@@ -81,8 +81,30 @@ import java.io.FileWriter
 import java.io.PrintWriter
 import java.util.UUID
 
+import app.pramaan.camera.CameraState
+import app.pramaan.ui.components.CameraPermissionGate
+
 @Composable
 fun RecordScreen(
+    athleteId: String,
+    testType: TestType,
+    container: AppContainer,
+    onFinished: (sessionId: String) -> Unit,
+    onBack: () -> Unit
+) {
+    CameraPermissionGate {
+        RecordScreenContent(
+            athleteId = athleteId,
+            testType = testType,
+            container = container,
+            onFinished = onFinished,
+            onBack = onBack
+        )
+    }
+}
+
+@Composable
+private fun RecordScreenContent(
     athleteId: String,
     testType: TestType,
     container: AppContainer,
@@ -132,12 +154,13 @@ fun RecordScreen(
         }
     }
 
+    val videoFile = remember { container.sessionStore.getVideoFile(sessionId) }
+
     // Session recording lifecycle (Camera, Gyro, Pose)
     DisposableEffect(sessionId) {
         val sessionDir = container.sessionStore.getSessionDir(sessionId)
         sessionDir.mkdirs()
 
-        val videoFile = container.sessionStore.getVideoFile(sessionId)
         val framesFile = container.sessionStore.getFramesFile(sessionId)
         val gyroFile = container.sessionStore.getGyroFile(sessionId)
 
@@ -175,8 +198,10 @@ fun RecordScreen(
             }
         }
 
-        // Start video capture
-        container.cameraController.startRecording(videoFile) { }
+        // Start video capture if camera already bound
+        if (container.cameraController.cameraState.value == CameraState.BOUND) {
+            container.cameraController.startRecording(videoFile) { }
+        }
         isRunning = true
 
         onDispose {
@@ -194,7 +219,7 @@ fun RecordScreen(
 
         scope.launch {
             withContext(Dispatchers.IO) {
-                container.cameraController.stopRecording()
+                container.cameraController.stopAndAwaitFinalize()
                 container.poseEngine.stopRecording()
                 val gyroFile = container.sessionStore.getGyroFile(sessionId)
                 container.gyroRecorder.stopRecording(gyroFile)
@@ -245,7 +270,12 @@ fun RecordScreen(
                         PreviewView(ctx).apply {
                             container.cameraController.bindCamera(
                                 lifecycleOwner = lifecycleOwner,
-                                previewView = this
+                                previewView = this,
+                                onBound = { success ->
+                                    if (success) {
+                                        container.cameraController.startRecording(videoFile) { }
+                                    }
+                                }
                             )
                         }
                     }

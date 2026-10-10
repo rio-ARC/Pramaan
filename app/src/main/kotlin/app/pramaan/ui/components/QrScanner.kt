@@ -27,83 +27,86 @@ fun QrScanner(
     onQrScanned: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val scanner = remember { BarcodeScanning.getClient() }
-    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    CameraPermissionGate(modifier = modifier) {
+        val context = LocalContext.current
+        val lifecycleOwner = LocalLifecycleOwner.current
+        val scanner = remember { BarcodeScanning.getClient() }
+        val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            cameraExecutor.shutdown()
-            scanner.close()
+        DisposableEffect(Unit) {
+            onDispose {
+                cameraExecutor.shutdown()
+                scanner.close()
+            }
         }
-    }
 
-    Box(modifier = modifier) {
-        AndroidView(
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx)
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
 
-                cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
 
-                    val preview = Preview.Builder().build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
+                        val preview = Preview.Builder().build().also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
 
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
 
-                    var hasScanned = false
+                        var hasScanned = false
 
-                    imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                        val mediaImage = imageProxy.image
-                        if (mediaImage != null && !hasScanned) {
-                            val image = InputImage.fromMediaImage(
-                                mediaImage,
-                                imageProxy.imageInfo.rotationDegrees
-                            )
-                            scanner.process(image)
-                                .addOnSuccessListener { barcodes ->
-                                    for (barcode in barcodes) {
-                                        if (barcode.valueType == Barcode.TYPE_TEXT ||
-                                            barcode.format == Barcode.FORMAT_QR_CODE
-                                        ) {
-                                            val rawValue = barcode.rawValue
-                                            if (rawValue != null && !hasScanned) {
-                                                hasScanned = true
-                                                onQrScanned(rawValue)
-                                                break
+                        imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                            val mediaImage = imageProxy.image
+                            if (mediaImage != null && !hasScanned) {
+                                val image = InputImage.fromMediaImage(
+                                    mediaImage,
+                                    imageProxy.imageInfo.rotationDegrees
+                                )
+                                scanner.process(image)
+                                    .addOnSuccessListener { barcodes ->
+                                        for (barcode in barcodes) {
+                                            if (barcode.valueType == Barcode.TYPE_TEXT ||
+                                                barcode.format == Barcode.FORMAT_QR_CODE
+                                            ) {
+                                                val rawValue = barcode.rawValue
+                                                if (rawValue != null && !hasScanned) {
+                                                    hasScanned = true
+                                                    onQrScanned(rawValue)
+                                                    break
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                .addOnCompleteListener {
-                                    imageProxy.close()
-                                }
-                        } else {
-                            imageProxy.close()
+                                    .addOnCompleteListener {
+                                        imageProxy.close()
+                                    }
+                            } else {
+                                imageProxy.close()
+                            }
                         }
-                    }
 
-                    try {
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageAnalysis
-                        )
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }, ContextCompat.getMainExecutor(ctx))
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                preview,
+                                imageAnalysis
+                            )
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
 
-                previewView
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                    previewView
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
+

@@ -1,0 +1,3 @@
+@echo off
+echo Building and running Pramaan Verification Server...
+gradlew.bat :server:run --no-daemon
