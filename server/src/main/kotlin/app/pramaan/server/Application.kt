@@ -3,6 +3,10 @@ package app.pramaan.server
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.auth.Authentication
+import io.ktor.server.auth.UserIdPrincipal
+import io.ktor.server.auth.basic
+import io.ktor.server.auth.bearer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
@@ -39,14 +43,44 @@ fun Application.module() {
         })
     }
 
+    install(Authentication) {
+        bearer("api") {
+            authenticate { credential ->
+                val hash = TokenRepo.hashToken(credential.token)
+                TokenRepo.findAccount(hash)?.let { account ->
+                    AccountPrincipal(account.id, account.role, account)
+                }
+            }
+        }
+        basic("admin") {
+            realm = "Pramaan Admin Dashboard"
+            validate { credentials ->
+                val expectedPass = System.getenv("ADMIN_PASSWORD") ?: "pramaan"
+                if (credentials.name == "admin" && credentials.password == expectedPass) {
+                    UserIdPrincipal(credentials.name)
+                } else null
+            }
+        }
+    }
+
     val dataDir = (System.getenv("PRAMAAN_DATA_DIR")?.let { File(it) }
         ?: if (File("server").isDirectory) File("server/data") else File("data")).apply { mkdirs() }
 
     val dbFile = File(dataDir, "pramaan_server.db")
     val keyFile = File(dataDir, "server_key.json")
     val uploadsDir = File(dataDir, "uploads").apply { if (!exists()) mkdirs() }
+    val photosDir = File(dataDir, "photos").apply { if (!exists()) mkdirs() }
 
     ServerDb.init(dbFile)
+
+    // Seed coaches from coaches.json if empty
+    val seedFile = when {
+        File("server/seed/coaches.json").exists() -> File("server/seed/coaches.json")
+        File("seed/coaches.json").exists() -> File("seed/coaches.json")
+        else -> File(dataDir, "coaches.json")
+    }
+    AccountRepo.seedCoachesIfEmpty(seedFile)
+
     val certificateIssuer = ServerCertificateIssuer(keyFile)
 
     val lanIps = getLanIpAddresses()
@@ -56,6 +90,7 @@ fun Application.module() {
         configureRoutes(
             certificateIssuer = certificateIssuer,
             uploadsDir = uploadsDir,
+            photosDir = photosDir,
             lanIp = primaryLanIp
         )
     }
@@ -77,7 +112,7 @@ fun main() {
          HOW TO CONNECT YOUR PHONE:
          1. Open http://localhost:8080 in your laptop browser to view the pairing QR.
          2. Make sure phone and laptop are on the same Wi-Fi or Mobile Hotspot.
-         3. On the Pramaan phone app, go to Sync -> Tap 'Scan Server QR'.
+         3. On the Pramaan phone app, go to Connect -> Scan Server QR.
          4. Point phone at the pairing QR on your laptop screen!
         ========================================================================
         """.trimIndent()
