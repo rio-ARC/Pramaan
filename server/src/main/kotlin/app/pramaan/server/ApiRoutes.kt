@@ -46,8 +46,16 @@ fun Route.configureRoutes(
         val jws = call.parameters["jws"] ?: ""
         val claims = certificateIssuer.verifyCertificate(jws)
         val isValid = claims != null
+        val sid = claims?.getClaim("sid") as? String
+        val session = sid?.let { ServerDb.getById(it) }
         call.respondHtml {
-            renderVerificationPage(claims, isValid)
+            renderVerificationPage(
+                claims = claims,
+                isValid = isValid,
+                rawJws = jws,
+                session = session,
+                lanIp = lanIp
+            )
         }
     }
 

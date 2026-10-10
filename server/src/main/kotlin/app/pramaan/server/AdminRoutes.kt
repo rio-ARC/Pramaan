@@ -37,9 +37,28 @@ fun Route.configureAdminRoutes(
 
         // 2. Submissions list
         get("/submissions") {
-            val sessions = ServerDb.getAll()
+            val statusFilter = call.request.queryParameters["status"]?.uppercase() ?: "ALL"
+            val allSessions = ServerDb.getAll()
+            val filteredSessions = when (statusFilter) {
+                "AWAITING_REVIEW" -> allSessions.filter { it.status == "AWAITING_REVIEW" }
+                "APPROVED" -> allSessions.filter { it.status == "APPROVED" }
+                "FLAGGED" -> allSessions.filter { it.integrity == "FLAGGED" }
+                "AUTO_REJECTED" -> allSessions.filter { it.status == "AUTO_REJECTED" || it.status == "REJECTED" }
+                else -> allSessions
+            }
+            val counts = mapOf(
+                "ALL" to allSessions.size,
+                "AWAITING_REVIEW" to allSessions.count { it.status == "AWAITING_REVIEW" },
+                "APPROVED" to allSessions.count { it.status == "APPROVED" },
+                "FLAGGED" to allSessions.count { it.integrity == "FLAGGED" },
+                "AUTO_REJECTED" to allSessions.count { it.status == "AUTO_REJECTED" || it.status == "REJECTED" }
+            )
             call.respondHtml {
-                renderSubmissionsPage(sessions)
+                renderSubmissionsPage(
+                    sessions = filteredSessions,
+                    activeFilter = statusFilter,
+                    counts = counts
+                )
             }
         }
 
