@@ -7,15 +7,18 @@ import androidx.room.PrimaryKey
 data class SessionEntity(
     @PrimaryKey
     val id: String,
-    val athleteId: String,
+    val ownerAccountId: String,
     val test: String,
     val source: String,
     val folder: String,
     val best: Double,
     val unit: String,
-    val badge: String,
-    val synced: Boolean = false,
-    val serverBadge: String? = null,
+    val localIntegrity: String,
+    val status: String,
+    val serverIntegrity: String? = null,
+    val reviewedByName: String? = null,
+    val reviewMethod: String? = null,
+    val reviewReason: String? = null,
     val certificateJws: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )

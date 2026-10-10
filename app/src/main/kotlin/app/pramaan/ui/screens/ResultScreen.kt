@@ -83,7 +83,7 @@ import kotlinx.coroutines.withContext
 fun ResultScreen(
     sessionId: String,
     container: AppContainer,
-    onNavigateToCoSign: (String) -> Unit,
+    onSubmitForCoach: (String) -> Unit,
     onNavigateToCertificate: (String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -103,9 +103,9 @@ fun ResultScreen(
             val sess = container.sessionDao.getById(sessionId)
             session = sess
             sess?.let {
-                athlete = container.athleteDao.getById(it.athleteId)
+                athlete = container.athleteDao.getById(it.ownerAccountId)
                 try {
-                    currentBadge = Badge.valueOf(it.badge)
+                    currentBadge = Badge.valueOf(it.localIntegrity)
                 } catch (_: Exception) { }
             }
 
@@ -519,17 +519,40 @@ fun ResultScreen(
             // 4. Action Buttons (Stitch Screen 4)
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PramaanButton(
-                        text = "Get Witness Signature (Offline QR)",
-                        icon = Icons.Default.QrCode2,
-                        onClick = { onNavigateToCoSign(sessionId) }
-                    )
+                    val isApproved = session?.status.equals("APPROVED", ignoreCase = true)
+                    val isSubmitted = session?.status.equals("SUBMITTED", ignoreCase = true)
 
-                    PramaanOutlinedButton(
-                        text = "View Digital Certificate",
-                        icon = Icons.Default.Badge,
-                        onClick = { onNavigateToCertificate(sessionId) }
-                    )
+                    if (isApproved) {
+                        PramaanButton(
+                            text = "View Digital Certificate",
+                            icon = Icons.Default.Badge,
+                            onClick = { onNavigateToCertificate(sessionId) }
+                        )
+                    } else {
+                        var isSubmitting by remember { mutableStateOf(false) }
+                        PramaanButton(
+                            text = if (isSubmitting) "Submitting..." else if (isSubmitted) "Show Coach Verification QR" else "Submit for Coach Verification",
+                            icon = Icons.Default.QrCode2,
+                            onClick = {
+                                if (isSubmitted) {
+                                    onSubmitForCoach(sessionId)
+                                } else {
+                                    isSubmitting = true
+                                    scope.launch {
+                                        container.submissionRepository.submitSession(sessionId)
+                                        isSubmitting = false
+                                        onSubmitForCoach(sessionId)
+                                    }
+                                }
+                            }
+                        )
+
+                        PramaanOutlinedButton(
+                            text = "Save as Draft",
+                            icon = Icons.Default.ArrowBack,
+                            onClick = onBack
+                        )
+                    }
 
                     Text(
                         text = if (isTampering) "Injecting byte tamper..." else "Simulate Tamper (Demo Fraud Detection)",

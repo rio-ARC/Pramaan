@@ -16,8 +16,8 @@ class LocalVerifier(
 
         // Update database record badge
         val existing = sessionDao.getById(sessionId)
-        if (existing != null && existing.badge != outcome.badge.name) {
-            sessionDao.update(existing.copy(badge = outcome.badge.name))
+        if (existing != null && existing.localIntegrity != outcome.badge.name) {
+            sessionDao.update(existing.copy(localIntegrity = outcome.badge.name))
         }
         return outcome
     }

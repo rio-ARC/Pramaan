@@ -44,8 +44,9 @@ class TamperSimulator(
             val tamperedEntity = originalEntity.copy(
                 id = tamperedSessionId,
                 folder = tamperedDir.absolutePath,
-                synced = false,
-                serverBadge = null,
+                localIntegrity = "TAMPERED",
+                status = "DRAFT",
+                serverIntegrity = null,
                 certificateJws = null
             )
             sessionDao.insert(tamperedEntity)

@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.pramaan.AppContainer
+import app.pramaan.api.dto.AccountProfileDto
 import app.pramaan.core.model.TestType
 import app.pramaan.data.AthleteEntity
 import app.pramaan.ui.components.InitialsAvatar
@@ -67,37 +68,22 @@ import app.pramaan.ui.theme.PramaanOutline
 import app.pramaan.ui.theme.PramaanSaffron
 import app.pramaan.ui.theme.PramaanSurface
 import app.pramaan.ui.theme.PramaanTypography
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.sqrt
 
 class TestSetupViewModel(private val container: AppContainer) : ViewModel() {
-    val athletes: StateFlow<List<AthleteEntity>> = container.athleteDao.getAllFlow()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    var athleteProfile by mutableStateOf<AccountProfileDto?>(null)
+        private set
+    var accountId by mutableStateOf("")
+        private set
 
     val gyroRecorder = container.gyroRecorder
 
-    fun ensureDefaultAthlete(onDone: (AthleteEntity) -> Unit) {
+    init {
         viewModelScope.launch {
-            val list = container.athleteDao.getAll()
-            if (list.isNotEmpty()) {
-                onDone(list.first())
-            } else {
-                val defaultAthlete = AthleteEntity(
-                    id = "ATH-DEMO-01",
-                    name = "Manpreet Kaur",
-                    initials = "MK",
-                    age = 14,
-                    sex = "F",
-                    heightCm = 152.0,
-                    weightKg = 48.0,
-                    guardianConsent = true
-                )
-                container.athleteDao.insert(defaultAthlete)
-                onDone(defaultAthlete)
-            }
+            accountId = container.authStore.accountIdFlow.first() ?: "ATH-DEMO"
+            athleteProfile = container.authStore.getProfile()
         }
     }
 }
@@ -108,25 +94,12 @@ fun TestSetupScreen(
     testType: TestType,
     viewModel: TestSetupViewModel,
     onBeginTest: (athleteId: String, testType: TestType) -> Unit,
-    onNavigateToAthletes: () -> Unit,
     onBack: () -> Unit
 ) {
-    val athletes by viewModel.athletes.collectAsState()
-    var selectedAthlete by remember { mutableStateOf<AthleteEntity?>(null) }
     val currentRms by viewModel.gyroRecorder.currentRms.collectAsState()
     val gyroSteady = currentRms < 0.08
-
-    // Ensure we have a default athlete selected
-    DisposableEffect(athletes) {
-        if (selectedAthlete == null && athletes.isNotEmpty()) {
-            selectedAthlete = athletes.first()
-        } else if (athletes.isEmpty()) {
-            viewModel.ensureDefaultAthlete { athlete ->
-                selectedAthlete = athlete
-            }
-        }
-        onDispose { }
-    }
+    val profile = viewModel.athleteProfile
+    val accountId = viewModel.accountId
 
     // Monitor gyroscope steadiness in pre-flight
     DisposableEffect(Unit) {
@@ -189,21 +162,9 @@ fun TestSetupScreen(
                         text = "Begin Test: Attempt 1",
                         icon = Icons.Default.PlayCircle,
                         onClick = {
-                            selectedAthlete?.let { athlete ->
-                                onBeginTest(athlete.id, testType)
-                            }
+                            onBeginTest(accountId, testType)
                         },
-                        enabled = selectedAthlete != null
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Change Athlete",
-                        style = PramaanTypography.labelMedium,
-                        color = PramaanOnSurfaceVariant,
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .clickable { onNavigateToAthletes() }
-                            .padding(4.dp)
+                        enabled = accountId.isNotBlank()
                     )
                 }
             }
@@ -221,62 +182,60 @@ fun TestSetupScreen(
 
             // 1. Athlete Identity Card (Stitch Screen 2)
             item {
-                selectedAthlete?.let { athlete ->
-                    PramaanCard {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                PramaanCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFDCFCE7))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFFDCFCE7))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Verified,
-                                        contentDescription = null,
-                                        tint = PramaanEmerald,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "GUARDIAN CONSENT SIGNED",
-                                        style = PramaanTypography.labelSmall,
-                                        color = PramaanEmerald
-                                    )
-                                }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Verified,
+                                    contentDescription = null,
+                                    tint = PramaanEmerald,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (profile?.guardianConsent == true) "GUARDIAN CONSENT SIGNED" else "SELF REGISTERED",
+                                    style = PramaanTypography.labelSmall,
+                                    color = PramaanEmerald
+                                )
                             }
+                        }
+                        Text(
+                            text = if (accountId.isNotBlank()) "ID: $accountId" else "",
+                            style = PramaanTypography.labelSmall,
+                            color = PramaanOnSurfaceVariant
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        InitialsAvatar(name = profile?.name ?: "Athlete", size = 56)
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "U-16 Trial",
-                                style = PramaanTypography.labelMedium,
+                                text = profile?.name ?: "Athlete",
+                                style = PramaanTypography.titleLarge,
+                                color = PramaanOnSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${profile?.sex ?: "—"} • ${profile?.heightCm?.toInt() ?: 165} cm • ${profile?.weightKg?.toInt() ?: 55} kg",
+                                style = PramaanTypography.bodySmall,
                                 color = PramaanOnSurfaceVariant
                             )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            InitialsAvatar(name = athlete.name, size = 56)
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = athlete.name,
-                                    style = PramaanTypography.titleLarge,
-                                    color = PramaanOnSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "${athlete.age} Yrs • ${if (athlete.sex == "F") "Female" else "Male"} • ${athlete.heightCm.toInt()} cm",
-                                    style = PramaanTypography.bodySmall,
-                                    color = PramaanOnSurfaceVariant
-                                )
-                            }
                         }
                     }
                 }

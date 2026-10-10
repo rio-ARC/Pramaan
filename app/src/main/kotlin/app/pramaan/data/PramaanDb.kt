@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [AthleteEntity::class, SessionEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class PramaanDb : RoomDatabase() {
@@ -24,7 +24,10 @@ abstract class PramaanDb : RoomDatabase() {
                     context.applicationContext,
                     PramaanDb::class.java,
                     "pramaan_app.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }

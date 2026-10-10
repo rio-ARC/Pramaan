@@ -1,6 +1,9 @@
 package app.pramaan
 
 import android.content.Context
+import app.pramaan.api.ApiClient
+import app.pramaan.auth.AuthRepository
+import app.pramaan.auth.AuthStore
 import app.pramaan.camera.CameraController
 import app.pramaan.camera.GyroRecorder
 import app.pramaan.camera.PoseEngine
@@ -9,11 +12,11 @@ import app.pramaan.data.AthleteDao
 import app.pramaan.data.PramaanDb
 import app.pramaan.data.SessionDao
 import app.pramaan.data.SessionStore
-import app.pramaan.data.SyncClient
 import app.pramaan.seal.DeviceKey
 import app.pramaan.seal.LocalVerifier
 import app.pramaan.seal.Sealer
 import app.pramaan.seal.TamperSimulator
+import app.pramaan.submissions.SubmissionRepository
 import app.pramaan.witness.WitnessSigner
 
 class AppContainer(val context: Context) {
@@ -24,6 +27,13 @@ class AppContainer(val context: Context) {
     val sessionStore: SessionStore by lazy { SessionStore(context) }
     val deviceKey: DeviceKey by lazy { DeviceKey() }
 
+    val authStore: AuthStore by lazy { AuthStore(context) }
+    val apiClient: ApiClient by lazy { ApiClient(authStore) }
+    val authRepository: AuthRepository by lazy { AuthRepository(authStore, apiClient, deviceKey) }
+    val submissionRepository: SubmissionRepository by lazy {
+        SubmissionRepository(apiClient, sessionDao, sessionStore, authStore)
+    }
+
     val sealer: Sealer by lazy { Sealer(sessionStore, deviceKey, sessionDao) }
     val localVerifier: LocalVerifier by lazy { LocalVerifier(sessionStore, sessionDao) }
     val tamperSimulator: TamperSimulator by lazy { TamperSimulator(sessionStore, localVerifier, sessionDao) }
@@ -33,5 +43,4 @@ class AppContainer(val context: Context) {
     val poseEngine: PoseEngine by lazy { PoseEngine(context) }
     val cameraController: CameraController by lazy { CameraController(context, poseEngine) }
     val videoFilePoseRunner: VideoFilePoseRunner by lazy { VideoFilePoseRunner(context) }
-    val syncClient: SyncClient by lazy { SyncClient(sessionStore) }
 }

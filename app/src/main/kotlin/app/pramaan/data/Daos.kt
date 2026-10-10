@@ -34,17 +34,20 @@ interface SessionDao {
     @Query("SELECT * FROM sessions ORDER BY createdAt DESC")
     fun getAllFlow(): Flow<List<SessionEntity>>
 
-    @Query("SELECT * FROM sessions WHERE athleteId = :athleteId ORDER BY createdAt DESC")
-    fun getByAthleteIdFlow(athleteId: String): Flow<List<SessionEntity>>
+    @Query("SELECT * FROM sessions ORDER BY createdAt DESC")
+    suspend fun getAll(): List<SessionEntity>
+
+    @Query("SELECT * FROM sessions WHERE ownerAccountId = :ownerAccountId ORDER BY createdAt DESC")
+    fun getByOwnerAccountIdFlow(ownerAccountId: String): Flow<List<SessionEntity>>
 
     @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): SessionEntity?
 
-    @Query("SELECT COUNT(*) FROM sessions WHERE synced = 0")
-    fun getPendingSyncCountFlow(): Flow<Int>
+    @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
+    fun getByIdFlow(id: String): Flow<SessionEntity?>
 
-    @Query("SELECT * FROM sessions WHERE synced = 0 ORDER BY createdAt ASC")
-    suspend fun getPendingSessions(): List<SessionEntity>
+    @Query("SELECT COUNT(*) FROM sessions WHERE status = 'DRAFT'")
+    fun getDraftCountFlow(): Flow<Int>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(session: SessionEntity)

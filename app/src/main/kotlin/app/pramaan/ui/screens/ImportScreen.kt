@@ -121,22 +121,19 @@ fun ImportScreen(
                 )
 
                 statusText = "Evaluating physics & sealing session..."
-                val athletes = container.athleteDao.getAll()
-                val athlete = athletes.firstOrNull() ?: AthleteEntity(
+                val profile = container.authStore.getProfile() ?: app.pramaan.api.dto.AccountProfileDto(
                     id = "ATH-DEMO-01",
+                    role = "ATHLETE",
                     name = "Imported Athlete",
-                    initials = "IA",
-                    age = 15,
                     sex = "F",
                     heightCm = 155.0,
-                    weightKg = 50.0,
-                    guardianConsent = true
+                    weightKg = 50.0
                 )
 
                 container.sealer.sealSession(
                     sessionId = sessionId,
                     testType = TestType.VERTICAL_JUMP,
-                    athlete = athlete,
+                    athleteProfile = profile,
                     fps = 30,
                     source = "FILE"
                 )
@@ -212,22 +209,19 @@ fun ImportScreen(
                 }
 
                 statusText = "Running physics verification..."
-                val athletes = container.athleteDao.getAll()
-                val athlete = athletes.firstOrNull() ?: AthleteEntity(
+                val profile = container.authStore.getProfile() ?: app.pramaan.api.dto.AccountProfileDto(
                     id = "ATH-DEMO-01",
+                    role = "ATHLETE",
                     name = "Demo Athlete (Slowed Test)",
-                    initials = "DA",
-                    age = 15,
                     sex = "F",
                     heightCm = 155.0,
-                    weightKg = 50.0,
-                    guardianConsent = true
+                    weightKg = 50.0
                 )
 
                 container.sealer.sealSession(
                     sessionId = sessionId,
                     testType = TestType.VERTICAL_JUMP,
-                    athlete = athlete,
+                    athleteProfile = profile,
                     fps = 30,
                     source = "FILE"
                 )

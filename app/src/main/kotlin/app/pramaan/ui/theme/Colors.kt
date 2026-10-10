@@ -10,6 +10,7 @@ val PramaanEmerald = Color(0xFF16A34A)
 val PramaanEmeraldDark = Color(0xFF006E2D)
 val PramaanCerulean = Color(0xFF0284C7)
 val PramaanCeruleanDark = Color(0xFF006194)
+val PramaanNavy = Color(0xFF0F172A)
 
 // Neutral Foundation (High-glare daylight contrast)
 val PramaanSurface = Color(0xFFFAF8FF)

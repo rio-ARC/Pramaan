@@ -105,7 +105,7 @@ private fun RecordContent(
     val scope = rememberCoroutineScope()
 
     val sessionId = remember { UUID.randomUUID().toString() }
-    var athlete by remember { mutableStateOf<AthleteEntity?>(null) }
+    var athleteProfile by remember { mutableStateOf<app.pramaan.api.dto.AccountProfileDto?>(null) }
     var isSealing by remember { mutableStateOf(false) }
 
     // Live telemetry states
@@ -124,9 +124,9 @@ private fun RecordContent(
     val frameBuffer = remember { mutableStateListOf<PoseFrame>() }
     var frameCounter by remember { mutableIntStateOf(0) }
 
-    // Load athlete record
+    // Load athlete profile
     LaunchedEffect(athleteId) {
-        athlete = container.athleteDao.getById(athleteId)
+        athleteProfile = container.authStore.getProfile()
     }
 
     // Elapsed timer ticker
@@ -166,26 +166,25 @@ private fun RecordContent(
             frameCounter++
             // Throttle scoring evaluation to every 3 frames for smooth UI rendering
             if (frameCounter % 3 == 0) {
-                val ath = athlete
-                if (ath != null) {
-                    if (testType == TestType.VERTICAL_JUMP) {
-                        val result = VerticalJumpAnalyzer.analyze(frameBuffer.toList(), ath.heightCm)
-                        if (result.attempts.isNotEmpty()) {
-                            val lastAtt = result.attempts.last()
-                            provisionalMetric = Math.round(lastAtt.flightCm * 10.0) / 10.0
-                            if (provisionalMetric > bestBenchmark) {
-                                bestBenchmark = provisionalMetric
-                            }
-                            toastText = "Take-off Detected • Apex ${provisionalMetric} cm"
-                            liveFeedback = "Depth good, full extension on landing"
+                val prof = athleteProfile
+                val heightCm = prof?.heightCm ?: 165.0
+                if (testType == TestType.VERTICAL_JUMP) {
+                    val result = VerticalJumpAnalyzer.analyze(frameBuffer.toList(), heightCm)
+                    if (result.attempts.isNotEmpty()) {
+                        val lastAtt = result.attempts.last()
+                        provisionalMetric = Math.round(lastAtt.flightCm * 10.0) / 10.0
+                        if (provisionalMetric > bestBenchmark) {
+                            bestBenchmark = provisionalMetric
                         }
-                    } else if (testType == TestType.SIT_UPS) {
-                        val result = SitUpAnalyzer.analyze(frameBuffer.toList())
-                        provisionalMetric = result.totalReps.toDouble()
-                        bestBenchmark = provisionalMetric
-                        toastText = "Rep ${result.totalReps} • Flexion Valid"
-                        liveFeedback = "Rep valid: flexed > 70°"
+                        toastText = "Take-off Detected • Apex ${provisionalMetric} cm"
+                        liveFeedback = "Depth good, full extension on landing"
                     }
+                } else if (testType == TestType.SIT_UPS) {
+                    val result = SitUpAnalyzer.analyze(frameBuffer.toList())
+                    provisionalMetric = result.totalReps.toDouble()
+                    bestBenchmark = provisionalMetric
+                    toastText = "Rep ${result.totalReps} • Flexion Valid"
+                    liveFeedback = "Rep valid: flexed > 70°"
                 }
             }
         }
@@ -210,22 +209,20 @@ private fun RecordContent(
                 container.poseEngine.stopRecording()
                 container.gyroRecorder.stopRecording(gyroFile)
 
-                val ath = athlete ?: AthleteEntity(
+                val prof = athleteProfile ?: app.pramaan.api.dto.AccountProfileDto(
                     id = athleteId,
+                    role = "ATHLETE",
                     name = "Athlete",
-                    initials = "AT",
-                    age = 15,
                     sex = "M",
-                    heightCm = 160.0,
-                    weightKg = 52.0,
-                    guardianConsent = true
+                    heightCm = 165.0,
+                    weightKg = 55.0
                 )
 
                 val fps = container.poseEngine.measuredFps
                 container.sealer.sealSession(
                     sessionId = sessionId,
                     testType = testType,
-                    athlete = ath,
+                    athleteProfile = prof,
                     fps = fps
                 )
             }
