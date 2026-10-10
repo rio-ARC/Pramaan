@@ -65,6 +65,69 @@ class ServerCertificateIssuer(
         return signedJWT.serialize()
     }
 
+    fun issueCoachVerifiedCertificate(
+        sessionId: String,
+        manifestSha256: String,
+        athleteId: String,
+        athleteName: String,
+        athleteAge: Int?,
+        athleteSex: String?,
+        test: String,
+        score: Double,
+        unit: String,
+        integrity: String,
+        coachId: String,
+        coachName: String,
+        reviewMethod: String,
+        reviewedAt: Long,
+        recordedAt: Long = System.currentTimeMillis()
+    ): String {
+        val now = Date()
+        val parts = athleteName.trim().split(" ").filter { it.isNotBlank() }
+        val maskedName = if (parts.size > 1) {
+            "${parts.first()} ${parts.last().first()}."
+        } else {
+            athleteName
+        }
+
+        val athleteMap = mutableMapOf<String, Any>(
+            "id" to athleteId,
+            "name" to maskedName
+        )
+        if (athleteAge != null) athleteMap["age"] = athleteAge
+        if (athleteSex != null) athleteMap["sex"] = athleteSex
+
+        val reviewMap = mapOf<String, Any>(
+            "by" to coachId,
+            "name" to coachName,
+            "method" to reviewMethod,
+            "at" to reviewedAt
+        )
+
+        val claims = JWTClaimsSet.Builder()
+            .issuer("PRAMAAN_CENTRAL_AUTHORITY")
+            .jwtID("cert_" + java.util.UUID.randomUUID().toString().replace("-", "").take(16))
+            .issueTime(now)
+            .claim("sid", sessionId)
+            .claim("sha256", manifestSha256)
+            .claim("athlete", athleteMap)
+            .claim("test", test)
+            .claim("score", score)
+            .claim("unit", unit)
+            .claim("integrity", integrity)
+            .claim("review", reviewMap)
+            .claim("recordedAt", recordedAt)
+            .build()
+
+        val header = JWSHeader.Builder(JWSAlgorithm.ES256)
+            .keyID(ecKey.keyID)
+            .build()
+
+        val signedJWT = SignedJWT(header, claims)
+        signedJWT.sign(signer)
+        return signedJWT.serialize()
+    }
+
     fun verifyCertificate(jws: String): JWTClaimsSet? {
         return try {
             val signedJWT = SignedJWT.parse(jws)

@@ -1,5 +1,6 @@
 package app.pramaan.ui
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,6 +22,11 @@ import app.pramaan.ui.athlete.ProfileScreen
 import app.pramaan.ui.athlete.ShowQrScreen
 import app.pramaan.ui.athlete.SubmissionDetailScreen
 import app.pramaan.ui.athlete.SubmissionsScreen
+import app.pramaan.ui.coach.CoachHistoryScreen
+import app.pramaan.ui.coach.CoachHomeScreen
+import app.pramaan.ui.coach.CoachScanScreen
+import app.pramaan.ui.coach.DecisionDoneScreen
+import app.pramaan.ui.coach.ReviewScreen
 import app.pramaan.ui.onboarding.AthleteRegisterScreen
 import app.pramaan.ui.onboarding.CoachLoginScreen
 import app.pramaan.ui.onboarding.ConnectScreen
@@ -42,6 +48,21 @@ object Routes {
 
     const val ATHLETE_HOME = "athlete_home"
     const val COACH_HOME = "coach_home"
+    const val COACH_SCAN = "coach_scan"
+
+    const val COACH_REVIEW = "coach_review/{sessionId}?isScanned={isScanned}&scannedQr={scannedQr}"
+    fun coachReview(sessionId: String, isScanned: Boolean = false, scannedQr: String? = null): String {
+        val qrPart = if (!scannedQr.isNullOrBlank()) "&scannedQr=${Uri.encode(scannedQr)}" else ""
+        return "coach_review/$sessionId?isScanned=$isScanned$qrPart"
+    }
+
+    const val COACH_DECISION_DONE = "coach_decision_done/{sessionId}/{isApproved}?certJws={certJws}"
+    fun coachDecisionDone(sessionId: String, isApproved: Boolean, certJws: String? = null): String {
+        val certPart = if (!certJws.isNullOrBlank()) "?certJws=${Uri.encode(certJws)}" else ""
+        return "coach_decision_done/$sessionId/$isApproved$certPart"
+    }
+
+    const val COACH_HISTORY = "coach_history"
 
     const val TEST_SETUP = "test_setup/{testType}"
     fun testSetup(testType: TestType) = "test_setup/${testType.name}"
@@ -93,7 +114,7 @@ fun PramaanNavHost(
                     serverUrl.isNullOrBlank() -> Routes.CONNECT
                     token.isNullOrBlank() -> Routes.WELCOME
                     role == Role.ATHLETE -> Routes.ATHLETE_HOME
-                    role == Role.COACH -> Routes.ATHLETE_HOME
+                    role == Role.COACH -> Routes.COACH_HOME
                     else -> Routes.WELCOME
                 }
                 navController.navigate(dest) {
@@ -139,13 +160,14 @@ fun PramaanNavHost(
             CoachLoginScreen(
                 container = container,
                 onLoggedIn = {
-                    navController.navigate(Routes.ATHLETE_HOME) {
+                    navController.navigate(Routes.COACH_HOME) {
                         popUpTo(Routes.WELCOME) { inclusive = true }
                     }
                 }
             )
         }
 
+        // ================= ATHLETE GRAPH =================
         composable(Routes.ATHLETE_HOME) {
             AthleteHomeScreen(
                 container = container,
@@ -309,6 +331,110 @@ fun PramaanNavHost(
                 container = container,
                 onNavigateToResult = { sessionId ->
                     navController.navigate(Routes.result(sessionId))
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        // ================= COACH GRAPH =================
+        composable(Routes.COACH_HOME) {
+            CoachHomeScreen(
+                container = container,
+                onScanQr = {
+                    navController.navigate(Routes.COACH_SCAN)
+                },
+                onSelectSession = { sessionId, isScanned ->
+                    navController.navigate(Routes.coachReview(sessionId, isScanned))
+                },
+                onViewHistory = {
+                    navController.navigate(Routes.COACH_HISTORY)
+                },
+                onLogout = {
+                    navController.navigate(Routes.WELCOME) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable(Routes.COACH_SCAN) {
+            CoachScanScreen(
+                onSessionScanned = { sessionId, rawQr ->
+                    navController.navigate(Routes.coachReview(sessionId, isScanned = true, scannedQr = rawQr)) {
+                        popUpTo(Routes.COACH_HOME)
+                    }
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.COACH_REVIEW,
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("isScanned") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
+                navArgument("scannedQr") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+            val isScanned = backStackEntry.arguments?.getBoolean("isScanned") ?: false
+            val scannedQr = backStackEntry.arguments?.getString("scannedQr")
+
+            ReviewScreen(
+                container = container,
+                sessionId = sessionId,
+                isScanned = isScanned,
+                scannedQr = scannedQr,
+                onDecisionDone = { sid, isApproved, certJws ->
+                    navController.navigate(Routes.coachDecisionDone(sid, isApproved, certJws)) {
+                        popUpTo(Routes.COACH_HOME)
+                    }
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.COACH_DECISION_DONE,
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("isApproved") { type = NavType.BoolType },
+                navArgument("certJws") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+            val isApproved = backStackEntry.arguments?.getBoolean("isApproved") ?: false
+            val certJws = backStackEntry.arguments?.getString("certJws")
+
+            DecisionDoneScreen(
+                container = container,
+                sessionId = sessionId,
+                isApproved = isApproved,
+                certificateJws = certJws,
+                onBackToQueue = {
+                    navController.navigate(Routes.COACH_HOME) {
+                        popUpTo(Routes.COACH_HOME) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable(Routes.COACH_HISTORY) {
+            CoachHistoryScreen(
+                container = container,
+                onViewCertificate = { sessionId ->
+                    navController.navigate(Routes.certificate(sessionId))
                 },
                 onBack = { navController.popBackStack() }
             )

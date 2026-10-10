@@ -71,6 +71,19 @@ fun Route.configureRoutes(
     configureAthleteRoutes(uploadsDir = uploadsDir, baseUrl = baseUrl)
     configureAdminRoutes(lanIp = lanIp, uploadsDir = uploadsDir)
 
+    val reviewService = ReviewService(
+        accountRepo = AccountRepo,
+        eventLog = EventLog,
+        certificateIssuer = certificateIssuer,
+        baseUrl = { baseUrl }
+    )
+    configureCoachRoutes(
+        accountRepo = AccountRepo,
+        reviewService = reviewService,
+        uploadsDir = uploadsDir,
+        baseUrl = { baseUrl }
+    )
+
     // 4. Backward-compatible read-only API sessions queries
     get("/api/sessions") {
         call.respond(ServerDb.getAll())

@@ -7,6 +7,11 @@ import app.pramaan.api.dto.AthleteSessionDetailDto
 import app.pramaan.api.dto.AthleteSessionSummaryDto
 import app.pramaan.api.dto.AuthResponseDto
 import app.pramaan.api.dto.CoachLoginRequest
+import app.pramaan.api.dto.CoachQueueItemDto
+import app.pramaan.api.dto.CoachSessionDetailDto
+import app.pramaan.api.dto.CoachReviewRequest
+import app.pramaan.api.dto.CoachReviewResponse
+import app.pramaan.api.dto.CoachHistoryItemDto
 import app.pramaan.api.dto.SessionUploadResponseDto
 import app.pramaan.auth.AuthStore
 import app.pramaan.data.SessionStore
@@ -257,6 +262,84 @@ class ApiClient(private val authStore: AuthStore) {
             val body = response.bodyAsText()
             if (response.status == HttpStatusCode.OK) {
                 Result.success(json.decodeFromString<AthleteSessionDetailDto>(body))
+            } else {
+                val err = parseError(body)
+                Result.failure(Exception(err.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getCoachQueue(): Result<List<CoachQueueItemDto>> {
+        return try {
+            val base = getBaseUrl()
+            val token = authStore.getToken() ?: return Result.failure(Exception("Not logged in"))
+            val response = client.get("$base/api/coach/queue") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            val body = response.bodyAsText()
+            if (response.status == HttpStatusCode.OK) {
+                Result.success(json.decodeFromString<List<CoachQueueItemDto>>(body))
+            } else {
+                val err = parseError(body)
+                Result.failure(Exception(err.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getCoachSessionDetail(sessionId: String): Result<CoachSessionDetailDto> {
+        return try {
+            val base = getBaseUrl()
+            val token = authStore.getToken() ?: return Result.failure(Exception("Not logged in"))
+            val response = client.get("$base/api/coach/sessions/$sessionId") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            val body = response.bodyAsText()
+            if (response.status == HttpStatusCode.OK) {
+                Result.success(json.decodeFromString<CoachSessionDetailDto>(body))
+            } else {
+                val err = parseError(body)
+                Result.failure(Exception(err.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitCoachReview(sessionId: String, request: CoachReviewRequest): Result<CoachReviewResponse> {
+        return try {
+            val base = getBaseUrl()
+            val token = authStore.getToken() ?: return Result.failure(Exception("Not logged in"))
+            val response = client.post("$base/api/coach/sessions/$sessionId/review") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(CoachReviewRequest.serializer(), request))
+            }
+            val body = response.bodyAsText()
+            if (response.status == HttpStatusCode.OK) {
+                Result.success(json.decodeFromString<CoachReviewResponse>(body))
+            } else {
+                val err = parseError(body)
+                Result.failure(Exception(err.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getCoachHistory(): Result<List<CoachHistoryItemDto>> {
+        return try {
+            val base = getBaseUrl()
+            val token = authStore.getToken() ?: return Result.failure(Exception("Not logged in"))
+            val response = client.get("$base/api/coach/history") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            val body = response.bodyAsText()
+            if (response.status == HttpStatusCode.OK) {
+                Result.success(json.decodeFromString<List<CoachHistoryItemDto>>(body))
             } else {
                 val err = parseError(body)
                 Result.failure(Exception(err.message))

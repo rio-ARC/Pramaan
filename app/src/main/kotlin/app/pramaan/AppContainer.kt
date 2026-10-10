@@ -33,6 +33,12 @@ class AppContainer(val context: Context) {
     val submissionRepository: SubmissionRepository by lazy {
         SubmissionRepository(apiClient, sessionDao, sessionStore, authStore)
     }
+    val reviewSigner: app.pramaan.review.ReviewSigner by lazy {
+        app.pramaan.review.ReviewSigner(deviceKey, authStore)
+    }
+    val reviewRepository: app.pramaan.review.ReviewRepository by lazy {
+        app.pramaan.review.ReviewRepository(apiClient, reviewSigner)
+    }
 
     val sealer: Sealer by lazy { Sealer(sessionStore, deviceKey, sessionDao) }
     val localVerifier: LocalVerifier by lazy { LocalVerifier(sessionStore, sessionDao) }
