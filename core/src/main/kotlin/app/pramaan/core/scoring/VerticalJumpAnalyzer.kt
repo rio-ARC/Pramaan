@@ -155,6 +155,12 @@ class VerticalJumpAnalyzer(
 
             State.STANDING -> {
                 updateBaseline(t, bothToesY, hipY)
+                if (baselineValid && lm.size >= 33) {
+                    val currentScale = BodyScale.calculate(listOf(center.frame), heightCm)
+                    if (currentScale != null) {
+                        bodyScale = currentScale
+                    }
+                }
                 val threshold = (bodyScale?.threshold2Percent ?: 0.015).toFloat()
 
                 // Check for downward dip of the hip

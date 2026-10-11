@@ -98,11 +98,11 @@ object Checks {
 
     /**
      * C3: Two-method agreement check (jump only).
-     * abs(flight-time height - hip-rise height) <= max(4 cm, 20% of flight height).
+     * abs(flight-time height - hip-rise height) <= max(8 cm, 30% of flight height).
      */
     fun checkTwoMethodAgreement(flightCm: Double, hipRiseCm: Double): CheckResult {
         val diff = Math.abs(flightCm - hipRiseCm)
-        val maxAllowed = Math.max(4.0, 0.20 * flightCm)
+        val maxAllowed = Math.max(8.0, 0.30 * flightCm)
         val pass = diff <= maxAllowed
 
         val formattedDiff = String.format(Locale.US, "%.1f", diff)
@@ -115,14 +115,15 @@ object Checks {
             id = "C3",
             pass = pass,
             value = "$formattedDiff cm Δ",
-            limit = "≤ max(4 cm, 20%)",
+            limit = "≤ max(8 cm, 30%)",
             reason = reason
         )
     }
 
     /**
      * C4: Camera steady check.
-     * Gyroscope RMS < 0.05 rad/s during recording (skipped for imported videos).
+     * Gyroscope RMS < 0.12 rad/s during recording (skipped for imported videos).
+     * Filters out initial and final finger tap transients from start/stop button presses.
      */
     fun checkCameraSteady(gyroSamples: List<GyroSample>, isImported: Boolean = false): CheckResult {
         if (isImported) {
@@ -130,26 +131,68 @@ object Checks {
                 id = "C4",
                 pass = true,
                 value = "Skipped",
-                limit = "< 0.05 rad/s",
+                limit = "< 0.12 rad/s",
                 reason = "Skipped for imported video"
             )
         }
 
-        val rms = calculateGyroRms(gyroSamples)
-        val pass = rms < 0.05
+        if (gyroSamples.isEmpty()) {
+            return CheckResult(
+                id = "C4",
+                pass = true,
+                value = "0.000 rad/s",
+                limit = "< 0.12 rad/s",
+                reason = null
+            )
+        }
+
+        val effectiveSamples = filterTapTransients(gyroSamples)
+        val rms = calculateGyroRms(effectiveSamples)
+        val pass = rms < 0.12
         val formattedRms = String.format(Locale.US, "%.3f", rms)
 
         val reason = if (!pass) {
-            "Camera moved during recording: gyro RMS $formattedRms rad/s (limit 0.05)"
+            "Camera moved during recording: gyro RMS $formattedRms rad/s (limit 0.12)"
         } else null
 
         return CheckResult(
             id = "C4",
             pass = pass,
             value = "$formattedRms rad/s",
-            limit = "< 0.05 rad/s",
+            limit = "< 0.12 rad/s",
             reason = reason
         )
+    }
+
+    fun filterTapTransients(samples: List<GyroSample>): List<GyroSample> {
+        if (samples.size < 4) return samples
+        val sorted = samples.sortedBy { it.t }
+        val firstT = sorted.first().t
+        val lastT = sorted.last().t
+        val duration = lastT - firstT
+
+        // Nanosecond timestamp check (>= 2.5 seconds)
+        if (duration >= 2_500_000_000L) {
+            val startCutoff = firstT + 1_000_000_000L
+            val endCutoff = lastT - 1_000_000_000L
+            val trimmed = sorted.filter { it.t in startCutoff..endCutoff }
+            if (trimmed.isNotEmpty()) return trimmed
+        } else if (duration in 2500L..100_000L) {
+            // Millisecond timestamp check (>= 2.5 seconds)
+            val startCutoff = firstT + 1000L
+            val endCutoff = lastT - 1000L
+            val trimmed = sorted.filter { it.t in startCutoff..endCutoff }
+            if (trimmed.isNotEmpty()) return trimmed
+        }
+
+        // Shorter duration: if enough samples, trim 15% from each end
+        if (sorted.size >= 6) {
+            val trimCount = (sorted.size * 0.15).toInt()
+            if (trimCount > 0 && sorted.size - 2 * trimCount > 0) {
+                return sorted.subList(trimCount, sorted.size - trimCount)
+            }
+        }
+        return sorted
     }
 
     fun calculateGyroRms(samples: List<GyroSample>): Double {

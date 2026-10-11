@@ -228,4 +228,39 @@ class IntegrityEngineTest {
         c2?.pass shouldBe false
         c2?.reason?.contains("too slow")?.shouldBe(true)
     }
+
+    @Test
+    fun `checkCameraSteady ignores start and stop tap spikes when duration exceeds 2_5s`() {
+        val samples = listOf(
+            // Tap spike at start (t = 0.0s to 0.5s)
+            GyroSample(t = 0L, x = 0.8, y = 0.9, z = 0.5),
+            GyroSample(t = 500_000_000L, x = 0.6, y = 0.7, z = 0.4),
+            // Steady tripod window (t = 1.0s to 3.0s)
+            GyroSample(t = 1_500_000_000L, x = 0.01, y = 0.01, z = 0.01),
+            GyroSample(t = 2_000_000_000L, x = 0.01, y = 0.02, z = 0.01),
+            GyroSample(t = 2_500_000_000L, x = 0.01, y = 0.01, z = 0.02),
+            // Tap spike at stop (t = 3.5s to 4.0s)
+            GyroSample(t = 3_500_000_000L, x = 0.7, y = 0.6, z = 0.5),
+            GyroSample(t = 4_000_000_000L, x = 0.9, y = 0.8, z = 0.6)
+        )
+
+        val result = app.pramaan.core.integrity.Checks.checkCameraSteady(samples)
+        result.pass shouldBe true
+        (result.value.removeSuffix(" rad/s").toDouble() < 0.12) shouldBe true
+    }
+
+    @Test
+    fun `checkTwoMethodAgreement respects max 8cm or 30 percent tolerance`() {
+        // 25 cm flight vs 31 cm hip rise (diff = 6 cm, which is <= 8.0 cm)
+        val result1 = app.pramaan.core.integrity.Checks.checkTwoMethodAgreement(25.0, 31.0)
+        result1.pass shouldBe true
+
+        // 40 cm flight vs 50 cm hip rise (diff = 10 cm, which is <= 0.30 * 40 = 12 cm)
+        val result2 = app.pramaan.core.integrity.Checks.checkTwoMethodAgreement(40.0, 50.0)
+        result2.pass shouldBe true
+
+        // 40 cm flight vs 55 cm hip rise (diff = 15 cm > 12 cm)
+        val result3 = app.pramaan.core.integrity.Checks.checkTwoMethodAgreement(40.0, 55.0)
+        result3.pass shouldBe false
+    }
 }
