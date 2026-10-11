@@ -48,6 +48,7 @@ object SessionsTable : Table("sessions") {
     val unit = varchar("unit", 16)
     val status = varchar("status", 32).default("AWAITING_REVIEW")
     val badge = varchar("badge", 32).default("VERIFIED")
+    val syncedAt = varchar("synced_at", 64).default("")
     val integrity = varchar("integrity", 32).nullable()
     val integrityJson = text("integrity_json").nullable()
     val manifestSha256 = varchar("manifest_sha256", 128).nullable()
@@ -142,9 +143,15 @@ object ServerDb {
                 SessionsTable,
                 SessionEventsTable
             )
-            // Safe fallback in case SQLite table existed with NOT NULL badge
+            // Safe fallback in case SQLite table existed with legacy NOT NULL badge or synced_at
             try {
                 exec("ALTER TABLE sessions ADD COLUMN integrity VARCHAR(32)")
+            } catch (_: Exception) {}
+            try {
+                exec("ALTER TABLE sessions ADD COLUMN synced_at VARCHAR(64) DEFAULT ''")
+            } catch (_: Exception) {}
+            try {
+                exec("ALTER TABLE sessions ADD COLUMN badge VARCHAR(32) DEFAULT 'VERIFIED'")
             } catch (_: Exception) {}
         }
     }
@@ -199,6 +206,7 @@ object ServerDb {
                     it[unit] = record.unit
                     it[status] = record.status
                     it[badge] = record.integrity ?: "VERIFIED"
+                    it[syncedAt] = record.submittedAt?.toString() ?: System.currentTimeMillis().toString()
                     it[integrity] = record.integrity
                     it[integrityJson] = record.integrityJson
                     it[manifestSha256] = record.manifestSha256
@@ -209,8 +217,8 @@ object ServerDb {
                     it[reviewReason] = record.reviewReason
                     it[coachSig] = record.coachSig
                     it[certificateJws] = record.certificateJws
-                    it[capturedAt] = record.capturedAt
-                    it[rawManifest] = record.rawManifest
+                    it[capturedAt] = record.capturedAt ?: ""
+                    it[rawManifest] = record.rawManifest ?: ""
                 }
             } else {
                 SessionsTable.insert {
@@ -222,6 +230,7 @@ object ServerDb {
                     it[unit] = record.unit
                     it[status] = record.status
                     it[badge] = record.integrity ?: "VERIFIED"
+                    it[syncedAt] = record.submittedAt?.toString() ?: System.currentTimeMillis().toString()
                     it[integrity] = record.integrity
                     it[integrityJson] = record.integrityJson
                     it[manifestSha256] = record.manifestSha256
@@ -232,8 +241,8 @@ object ServerDb {
                     it[reviewReason] = record.reviewReason
                     it[coachSig] = record.coachSig
                     it[certificateJws] = record.certificateJws
-                    it[capturedAt] = record.capturedAt
-                    it[rawManifest] = record.rawManifest
+                    it[capturedAt] = record.capturedAt ?: ""
+                    it[rawManifest] = record.rawManifest ?: ""
                 }
             }
         }

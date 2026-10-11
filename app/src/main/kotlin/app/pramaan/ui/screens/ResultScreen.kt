@@ -530,18 +530,52 @@ fun ResultScreen(
                         )
                     } else {
                         var isSubmitting by remember { mutableStateOf(false) }
+                        var submitError by remember { mutableStateOf<String?>(null) }
+
+                        if (submitError != null) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFFFEE2E2),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GppBad,
+                                        contentDescription = null,
+                                        tint = PramaanError,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = submitError!!,
+                                        style = PramaanTypography.bodySmall,
+                                        color = Color(0xFF991B1B)
+                                    )
+                                }
+                            }
+                        }
+
                         PramaanButton(
-                            text = if (isSubmitting) "Submitting..." else if (isSubmitted) "Show Coach Verification QR" else "Submit for Coach Verification",
+                            text = if (isSubmitting) "Submitting to Server..." else if (isSubmitted) "Show Coach Verification QR" else "Submit for Coach Verification",
                             icon = Icons.Default.QrCode2,
                             onClick = {
                                 if (isSubmitted) {
                                     onSubmitForCoach(sessionId)
                                 } else {
                                     isSubmitting = true
+                                    submitError = null
                                     scope.launch {
-                                        container.submissionRepository.submitSession(sessionId)
+                                        val res = container.submissionRepository.submitSession(sessionId)
                                         isSubmitting = false
-                                        onSubmitForCoach(sessionId)
+                                        if (res.isSuccess) {
+                                            onSubmitForCoach(sessionId)
+                                        } else {
+                                            submitError = res.exceptionOrNull()?.message ?: "Upload failed. Please check server connection."
+                                        }
                                     }
                                 }
                             }
