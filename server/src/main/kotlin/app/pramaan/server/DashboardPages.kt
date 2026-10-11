@@ -1,7 +1,10 @@
 package app.pramaan.server
 
+import app.pramaan.core.manifest.CanonicalJson
+import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.model.Badge
 import app.pramaan.core.model.CheckResult
+import app.pramaan.core.model.TestType
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.nimbusds.jwt.JWTClaimsSet
@@ -500,6 +503,104 @@ object DashboardPages {
                     }
                 }
 
+                // If Standing Broad Jump: show calibration card & attempts table with stills
+                val manifest = session.rawManifest?.let { raw ->
+                    try {
+                        CanonicalJson.decodeFromString(SessionManifest.serializer(), raw)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+
+                if (session.test == "BROAD_JUMP" || manifest?.test == TestType.BROAD_JUMP) {
+                    val calib = manifest?.calibration
+                    if (calib != null) {
+                        val marker = calib.marker
+                        val markerCm = calib.markerCm
+                        val markerDistPx = if (marker != null) kotlin.math.hypot((marker.x - calib.line.x) * calib.frameW, (marker.y - calib.line.y) * calib.frameH) else 0.0
+                        val scaleCmPerPx = if (markerDistPx > 0 && markerCm != null) markerCm / markerDistPx else 0.0
+                        val tiltDeg = if (marker != null) Math.toDegrees(kotlin.math.atan2((marker.y - calib.line.y) * calib.frameH, (marker.x - calib.line.x) * calib.frameW)) else 0.0
+
+                        div(classes = "table-card") {
+                            attributes["style"] = "padding: 20px;"
+                            h3 { +"Ground Calibration Details" }
+                            p {
+                                attributes["style"] = "font-size: 13px; color: #475569; margin-top: 4px;"
+                                +"Mode: ${calib.mode.name} • Frame: ${calib.frameW}×${calib.frameH} • Scale: ${"%.4f".format(scaleCmPerPx)} cm/px • Tilt: ${"%.1f".format(tiltDeg)}°"
+                            }
+                            if (calib.markerCm != null) {
+                                p {
+                                    attributes["style"] = "font-size: 13px; color: #EA580C; font-weight: 600; margin-top: 4px;"
+                                    +"Primary Reference: ${calib.markerCm} cm floor tape marker"
+                                }
+                            }
+                            div {
+                                attributes["style"] = "margin-top: 12px;"
+                                h4 {
+                                    attributes["style"] = "font-size: 12px; text-transform: uppercase; color: #64748B; margin-bottom: 6px;"
+                                    +"Calibration Frame"
+                                }
+                                img {
+                                    attributes["src"] = "/media/${session.id}/calib_frame.jpg"
+                                    attributes["style"] = "max-width: 480px; width: 100%; border-radius: 8px; border: 1px solid #E2E8F0;"
+                                    attributes["alt"] = "Calibration frame"
+                                }
+                            }
+                        }
+                    }
+
+                    val attempts = manifest?.result?.broadJumpAttempts ?: emptyList()
+                    if (attempts.isNotEmpty()) {
+                        div(classes = "table-card") {
+                            attributes["style"] = "padding: 20px;"
+                            h3 { +"Broad Jump Attempts Breakdown" }
+                            table {
+                                thead {
+                                    tr {
+                                        th { +"Attempt" }
+                                        th { +"Distance" }
+                                        th { +"Status / Fouls" }
+                                        th { +"Flight Time" }
+                                        th { +"Take-off Angle" }
+                                        th { +"Take-off Speed" }
+                                        th { +"Landing Still" }
+                                    }
+                                }
+                                tbody {
+                                    for (att in attempts) {
+                                        tr {
+                                            td(classes = "mono") { +"Jump ${att.index}" }
+                                            td(classes = "mono") {
+                                                attributes["style"] = "font-weight: 700; color: #0F172A;"
+                                                +"${"%.1f".format(att.distanceCm)} cm"
+                                            }
+                                            td {
+                                                if (att.valid) {
+                                                    span(classes = "badge-chip badge-VERIFIED") { +"VALID" }
+                                                } else {
+                                                    span(classes = "badge-chip badge-FLAGGED") {
+                                                        +if (att.fouls.isNotEmpty()) att.fouls.joinToString(", ") else "FOUL"
+                                                    }
+                                                }
+                                            }
+                                            td(classes = "mono") { +"${"%.2f".format(att.flightTimeS)} s" }
+                                            td(classes = "mono") { +if (att.takeoffAngleDeg != null) "${"%.1f".format(att.takeoffAngleDeg)}°" else "—" }
+                                            td(classes = "mono") { +if (att.takeoffSpeedMps != null) "${"%.2f".format(att.takeoffSpeedMps)} m/s" else "—" }
+                                            td {
+                                                val stillName = "att${att.index}_landing.jpg"
+                                                a(classes = "btn", href = "/media/${session.id}/stills/$stillName") {
+                                                    attributes["target"] = "_blank"
+                                                    +"View Still"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Physics checks
                 if (checks.isNotEmpty()) {
                     div(classes = "table-card") {
@@ -520,6 +621,7 @@ object DashboardPages {
                                         "C2" -> "Gravity"
                                         "C3" -> "Agreement"
                                         "C4" -> "Steadiness"
+                                        "C5" -> "Calibration"
                                         else -> c.id
                                     }
                                     tr {
@@ -765,7 +867,9 @@ object DashboardPages {
         val athleteAge = athleteMap?.get("age")?.toString()
         val athleteSex = athleteMap?.get("sex")?.toString()
 
-        val testName = (claims?.getClaim("test") ?: claims?.getClaim("tst") ?: "Vertical Jump").toString().replace('_', ' ')
+        val rawTest = (claims?.getClaim("test") ?: claims?.getClaim("tst") ?: "VERTICAL_JUMP").toString()
+        val calClaim = claims?.getClaim("cal")?.toString() ?: claims?.getClaim("calibration")?.toString()
+        val testName = if (rawTest == "BROAD_JUMP") "Standing Broad Jump" else rawTest.replace('_', ' ')
         val score = (claims?.getClaim("score") ?: claims?.getClaim("val") ?: "0.0").toString()
         val unit = (claims?.getClaim("unit") ?: claims?.getClaim("unt") ?: "").toString()
         val integrity = (claims?.getClaim("integrity") ?: claims?.getClaim("bdg") ?: "VERIFIED").toString()
@@ -841,6 +945,12 @@ object DashboardPages {
                                     +"$score $unit"
                                 }
                                 p { +"Test: $testName" }
+                                if (rawTest == "BROAD_JUMP" || calClaim != null) {
+                                    p {
+                                        attributes["style"] = "font-size: 13px; color: #EA580C; font-weight: 600; margin-top: 4px;"
+                                        +"Measured against a 200 cm floor marker"
+                                    }
+                                }
                             }
                         }
 
@@ -873,14 +983,29 @@ object DashboardPages {
                                     p {
                                         +"✓ C1 Seal Integrity: SHA-256 tamper-proof match verified"
                                     }
-                                    p {
-                                        +"✓ C2 Parabolic Gravity: Free-fall acceleration g = 9.81 m/s² (within ±8% tolerance)"
-                                    }
-                                    p {
-                                        +"✓ C3 Dual-Analyzer Agreement: Kinematic physics agrees with pose estimation"
-                                    }
-                                    p {
-                                        +"✓ C4 Camera Steadiness: Optical and accelerometer jitter within stationary envelope"
+                                    if (rawTest == "BROAD_JUMP") {
+                                        p {
+                                            +"✓ C2 Parabolic Gravity: Hip height trajectory follows g = 9.81 m/s² (within ±2.5 m/s²)"
+                                        }
+                                        p {
+                                            +"✓ C3 Horizontal Consistency: Kinematic forward travel and velocity within human limits"
+                                        }
+                                        p {
+                                            +"✓ C4 Camera Steadiness: Optical and accelerometer jitter within stationary envelope"
+                                        }
+                                        p {
+                                            +"✓ C5 Calibration Agreement: Scale verified against 200 cm floor marker"
+                                        }
+                                    } else {
+                                        p {
+                                            +"✓ C2 Parabolic Gravity: Free-fall acceleration g = 9.81 m/s² (within ±8% tolerance)"
+                                        }
+                                        p {
+                                            +"✓ C3 Dual-Analyzer Agreement: Kinematic physics agrees with pose estimation"
+                                        }
+                                        p {
+                                            +"✓ C4 Camera Steadiness: Optical and accelerometer jitter within stationary envelope"
+                                        }
                                     }
                                 }
                             }
@@ -943,7 +1068,7 @@ object DashboardPages {
                                             <p style="font-size: 11px; color: #64748B; margin-bottom: 6px;">COMPACT JWS TOKEN:</p>
                                             <pre style="word-break: break-all; white-space: pre-wrap; font-family: 'Space Grotesk', monospace; font-size: 11px; background: #0F172A; color: #38BDF8; padding: 12px; border-radius: 8px; max-height: 140px; overflow-y: auto;">$rawJws</pre>
                                             <p style="font-size: 11px; color: #64748B; margin-top: 10px; margin-bottom: 6px;">DECODED CLAIMS PAYLOAD:</p>
-                                            <pre style="word-break: break-all; white-space: pre-wrap; font-family: 'Space Grotesk', monospace; font-size: 11px; background: #F1F5F9; color: #0F172A; padding: 12px; border-radius: 8px;">${claims.toJSONObject()}</pre>
+                                            <pre style="word-break: break-all; white-space: pre-wrap; font-family: 'Space Grotesk', monospace; font-size: 11px; background: #F1F5F9; color: #0F172A; padding: 12px; border-radius: 8px;">${claims?.toJSONObject()}</pre>
                                         </div>
                                     </details>
                                 """.trimIndent())

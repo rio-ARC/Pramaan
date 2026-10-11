@@ -60,17 +60,25 @@ fun Route.configureRoutes(
     }
 
     // 2. Media Streaming
-    get("/media/{id}/video.mp4") {
+    get("/media/{id}/{path...}") {
         val id = call.parameters["id"] ?: ""
-        val videoFile = File(File(uploadsDir, id), "video.mp4")
-        if (videoFile.exists()) {
+        val path = call.parameters.getAll("path")?.joinToString("/") ?: "video.mp4"
+        if (path.contains("..")) {
+            call.respond(HttpStatusCode.BadRequest, "Invalid path")
+            return@get
+        }
+        val sessionDir = File(uploadsDir, id)
+        val file = File(sessionDir, path).takeIf { it.exists() && it.isFile }
+            ?: File(File(sessionDir, "stills"), path).takeIf { it.exists() && it.isFile }
+
+        if (file != null && file.exists()) {
             call.response.header(
                 HttpHeaders.ContentDisposition,
-                ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, "video.mp4").toString()
+                ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, file.name).toString()
             )
-            call.respondFile(videoFile)
+            call.respondFile(file)
         } else {
-            call.respond(HttpStatusCode.NotFound, "Video not found")
+            call.respond(HttpStatusCode.NotFound, "File not found")
         }
     }
 

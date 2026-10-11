@@ -60,7 +60,7 @@ object IntegrityEngine {
         val physicsFailed = checks.any { check ->
             if (check.id in listOf("C2", "C3", "C4")) {
                 !check.pass
-            } else if (check.id == "C5" && (check.reason == "CALIB_APPROX" || check.limit.contains("MARKER") || check.limit.contains("Diff"))) {
+            } else if (check.id == "C5" && (check.reason == "CALIB_APPROX" || check.reason == "HEIGHT_MISMATCH" || check.limit.contains("MARKER") || check.limit.contains("Diff") || check.limit.contains("Height") || check.limit.contains("tilt") || check.limit.contains("scale"))) {
                 !check.pass
             } else {
                 false

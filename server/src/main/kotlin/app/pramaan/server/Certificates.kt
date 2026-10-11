@@ -54,6 +54,10 @@ class ServerCertificateIssuer(
         if (witnessShortId != null) {
             claimsBuilder.claim("wit", witnessShortId)
         }
+        val calib = manifest.calibration
+        if (calib != null) {
+            claimsBuilder.claim("cal", calib.mode.name)
+        }
 
         val claims = claimsBuilder.build()
         val header = JWSHeader.Builder(JWSAlgorithm.ES256)
@@ -80,7 +84,8 @@ class ServerCertificateIssuer(
         coachName: String,
         reviewMethod: String,
         reviewedAt: Long,
-        recordedAt: Long = System.currentTimeMillis()
+        recordedAt: Long = System.currentTimeMillis(),
+        calibrationMode: String? = null
     ): String {
         val now = Date()
         val parts = athleteName.trim().split(" ").filter { it.isNotBlank() }
@@ -104,7 +109,7 @@ class ServerCertificateIssuer(
             "at" to reviewedAt
         )
 
-        val claims = JWTClaimsSet.Builder()
+        val claimsBuilder = JWTClaimsSet.Builder()
             .issuer("PRAMAAN_CENTRAL_AUTHORITY")
             .jwtID("cert_" + java.util.UUID.randomUUID().toString().replace("-", "").take(16))
             .issueTime(now)
@@ -117,7 +122,13 @@ class ServerCertificateIssuer(
             .claim("integrity", integrity)
             .claim("review", reviewMap)
             .claim("recordedAt", recordedAt)
-            .build()
+
+        if (calibrationMode != null) {
+            claimsBuilder.claim("cal", calibrationMode)
+            claimsBuilder.claim("calibration", calibrationMode)
+        }
+
+        val claims = claimsBuilder.build()
 
         val header = JWSHeader.Builder(JWSAlgorithm.ES256)
             .keyID(ecKey.keyID)

@@ -127,38 +127,35 @@
 ### Phase 0: Architecture & Plan (Current)
 - [x] Read `BroadJump_test.md`, `Build Description.md`, and verify existing codebase state.
 - [x] Create [PLAN_SBJ.md](file:///c:/Users/Pankaj%20Kumar%20Gupta/AndroidStudioProjects/Pramaan/PLAN_SBJ.md) with complete mapping, conflict analysis, and open questions.
-- [ ] **Awaiting user approval before proceeding to Phase 1.**
+- [x] Approved by user.
 
-### Phase 1: Pure Kotlin `:core` Analyzer & Checks
-- **Scope:**
-  - Create `scoring/broadjump/` package with `BroadJumpParams`, `GroundCalibration`, `BroadJumpResult`, `BroadJumpAnalyzer`, `BroadJumpLiveTracker`.
-  - Create `integrity/BroadJumpChecks.kt` (C2 Parabola on hip height, C3 Horizontal consistency, C5 Calibration agreement).
-  - Update `IntegrityEngine.kt` to dispatch SBJ checks while keeping `VERTICAL_JUMP` and `SIT_UPS` unchanged.
-  - Update `model/TestType.kt` and `manifest/SessionManifest.kt`.
-  - Create `test/SyntheticBroadJump.kt` generator.
-  - Implement and pass unit & acceptance tests **T-BJ-01 through T-BJ-18, T-BJ-20**.
+### Phase 1: Pure Kotlin `:core` Analyzer & Checks (Complete)
+- [x] Create `scoring/broadjump/` package with `BroadJumpParams`, `GroundCalibration`, `BroadJumpResult`, `BroadJumpAnalyzer`, `BroadJumpLiveTracker`.
+- [x] Create `integrity/BroadJumpChecks.kt` (C2 Parabola on hip height, C3 Horizontal consistency, C5 Calibration agreement).
+- [x] Update `IntegrityEngine.kt` to dispatch SBJ checks while keeping `VERTICAL_JUMP` and `SIT_UPS` unchanged.
+- [x] Update `model/TestType.kt` and `manifest/SessionManifest.kt`.
+- [x] Create `SyntheticBroadJump.kt` generator.
+- [x] Implement and pass unit & acceptance tests **T-BJ-01 through T-BJ-18, T-BJ-20** (51/51 tests green).
 - **Master Acceptance Condition:** All existing tests and all new SBJ core tests pass green with zero failures.
 
-### Phase 2: Android `:app` Capture, Calibration & Results
-- **Scope:**
-  - Enable Broad Jump tile on `AthleteHomeScreen.kt`.
-  - Create `TestSetupScreen` SBJ side-on guide and checklist.
-  - Implement SBJ HUD overlay in `RecordScreen.kt` using `BroadJumpLiveTracker`.
-  - Create `media/FrameExtractor.kt` and `media/StillRenderer.kt`.
-  - Build `BroadJumpCalibrationScreen.kt` with pinch-to-zoom, crosshair, line/mark tap, nudge arrows, and live validity checks.
-  - Extend `Sealer.kt` to package extra files and sign SBJ manifests.
-  - Update `ResultScreen.kt` with SBJ result presentation and attempt details.
-  - Add English and Hindi strings to `res/values/strings.xml` and `res/values-hi/strings.xml`.
+### Phase 2: Android `:app` Capture, Calibration & Results (Complete)
+- [x] Enable Broad Jump tile on `AthleteHomeScreen.kt`.
+- [x] Create `TestSetupScreen` SBJ side-on guide and checklist.
+- [x] Implement SBJ HUD overlay in `RecordScreen.kt` using `BroadJumpLiveTracker`.
+- [x] Create `media/FrameExtractor.kt` and `media/StillRenderer.kt`.
+- [x] Build `BroadJumpCalibrationScreen.kt` with pinch-to-zoom, crosshair, line/mark tap, nudge arrows, and live validity checks.
+- [x] Extend `Sealer.kt` to package extra files and sign SBJ manifests.
+- [x] Update `ResultScreen.kt` with SBJ result presentation and attempt details.
+- [x] Add English and Hindi strings to `res/values/strings.xml` and `res/values-hi/strings.xml`.
 - **Master Acceptance Condition:** End-to-end recording, calibration, sealing, and result display work smoothly on device.
 
-### Phase 3: Server Re-scoring & Role Workflow Integration
-- **Scope:**
-  - Implement `BroadJumpRescorer.kt` in `:server`.
-  - Update `SessionVerifier.kt` to handle SBJ sessions.
-  - Update `AthleteRoutes.kt` to support multipart `calib_frame` and `still_1..3` upload and enforce §9 rules.
-  - Update `CoachRoutes.kt` to serve calibration frames/stills and display attempt details.
-  - Update `DashboardPages.kt` to display SBJ sessions and update `/v/{jws}` certificate rendering.
-  - Implement server test suite `Phase5BroadJumpServerTest.kt` covering **T-BJ-S1 through T-BJ-S5**.
+### Phase 3: Server Re-scoring & Role Workflow Integration (Complete)
+- [x] Implement `BroadJumpRescorer.kt` in `:server`.
+- [x] Update `SessionVerifier.kt` to handle SBJ sessions and dispatch server rescoring.
+- [x] Update `AthleteRoutes.kt` to support multipart `calib_frame` and `stills/` subfolder upload, serve files, and enforce §9 rules.
+- [x] Update `CoachRoutes.kt` to serve calibration frames/stills and display attempt details.
+- [x] Update `DashboardPages.kt` to display SBJ sessions and update `/v/{jws}` certificate rendering.
+- [x] Implement server test suite `Phase5BroadJumpServerTest.kt` covering **T-BJ-S1 through T-BJ-S5** + rescore mismatch (all 6 tests passing).
 - **Master Acceptance Condition:** Two-role workflow (Athlete submits SBJ $\rightarrow$ Server re-scores $\rightarrow$ Coach reviews stills & signs $\rightarrow$ Certificate verifies) passes end-to-end.
 
 ### Phase 4: Accuracy Validation Module

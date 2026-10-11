@@ -1,6 +1,10 @@
 package app.pramaan.server
 
+import app.pramaan.core.manifest.CanonicalJson
+import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.model.CheckResult
+import app.pramaan.core.scoring.broadjump.BjAttempt
+import app.pramaan.core.scoring.broadjump.GroundCalibration
 import io.ktor.http.ContentDisposition
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -56,6 +60,10 @@ data class CoachSessionDetailResponse(
     val manifestSha256: String,
     val videoUrl: String,
     val checks: List<CheckResult>,
+    val attempts: List<BjAttempt>? = null,
+    val calibration: GroundCalibration? = null,
+    val calibFrameUrl: String? = null,
+    val stillUrls: List<String>? = null,
     val submittedAt: Long?,
     val reviewedBy: String? = null,
     val reviewedByName: String? = null,
@@ -216,6 +224,26 @@ fun Route.configureCoachRoutes(
 
                 val reviewer = row[SessionsTable.reviewedBy]?.let { accountRepo.getAccount(it) }
 
+                val manifest = row[SessionsTable.rawManifest]?.let { raw ->
+                    try {
+                        CanonicalJson.decodeFromString(SessionManifest.serializer(), raw)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+
+                val sessionDir = File(uploadsDir, sessionId)
+                val calibFrameUrl = if (File(sessionDir, "calib_frame.jpg").exists()) {
+                    "${baseUrl().removeSuffix("/")}/api/coach/sessions/$sessionId/files/calib_frame.jpg"
+                } else null
+
+                val stillsDir = File(sessionDir, "stills")
+                val stillUrls = if (stillsDir.exists() && stillsDir.isDirectory) {
+                    stillsDir.listFiles()?.filter { it.isFile }?.sortedBy { it.name }?.map {
+                        "${baseUrl().removeSuffix("/")}/api/coach/sessions/$sessionId/files/${it.name}"
+                    }
+                } else null
+
                 call.respond(
                     CoachSessionDetailResponse(
                         sessionId = row[SessionsTable.id],
@@ -234,6 +262,10 @@ fun Route.configureCoachRoutes(
                         manifestSha256 = row[SessionsTable.manifestSha256] ?: "",
                         videoUrl = "${baseUrl().removeSuffix("/")}/api/coach/sessions/$sessionId/video",
                         checks = checks,
+                        attempts = manifest?.result?.broadJumpAttempts,
+                        calibration = manifest?.calibration,
+                        calibFrameUrl = calibFrameUrl,
+                        stillUrls = stillUrls,
                         submittedAt = row[SessionsTable.submittedAt],
                         reviewedBy = row[SessionsTable.reviewedBy],
                         reviewedByName = reviewer?.name,
@@ -261,6 +293,32 @@ fun Route.configureCoachRoutes(
                     ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, "video.mp4").toString()
                 )
                 call.respondFile(videoFile)
+            }
+
+            // GET /api/coach/sessions/{id}/files/{name}
+            get("/sessions/{id}/files/{name}") {
+                val principal = call.ensureRole("COACH") ?: return@get
+                val sessionId = call.parameters["id"] ?: ""
+                val name = call.parameters["name"] ?: ""
+                if (name.contains("..")) {
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid file path"))
+                    return@get
+                }
+
+                val sessionDir = File(uploadsDir, sessionId)
+                val targetFile = File(sessionDir, name).takeIf { it.exists() && it.isFile }
+                    ?: File(File(sessionDir, "stills"), name).takeIf { it.exists() && it.isFile }
+
+                if (targetFile == null || !targetFile.exists()) {
+                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "File not found"))
+                    return@get
+                }
+
+                call.response.header(
+                    HttpHeaders.ContentDisposition,
+                    ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, targetFile.name).toString()
+                )
+                call.respondFile(targetFile)
             }
 
             // POST /api/coach/sessions/{id}/review

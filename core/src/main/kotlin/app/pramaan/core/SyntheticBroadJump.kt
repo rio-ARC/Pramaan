@@ -9,7 +9,6 @@ import app.pramaan.core.scoring.broadjump.NormPoint
 import java.util.Random
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.hypot
 import kotlin.math.sin
 
 data class SyntheticAttemptSpec(

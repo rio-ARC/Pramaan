@@ -2,7 +2,9 @@ package app.pramaan.server
 
 import app.pramaan.core.crypto.EcdsaVerifier
 import app.pramaan.core.crypto.Sha256
+import app.pramaan.core.manifest.CanonicalJson
 import app.pramaan.core.manifest.ReviewPayload
+import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.manifest.SessionQr
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.selectAll
@@ -129,6 +131,17 @@ class ReviewService(
             val test = sessionRow[SessionsTable.test]
             val best = sessionRow[SessionsTable.best]
             val unit = sessionRow[SessionsTable.unit]
+            val rawManifest = sessionRow[SessionsTable.rawManifest]
+            val calMode = if (test == "BROAD_JUMP") {
+                if (!rawManifest.isNullOrBlank()) {
+                    try {
+                        val m = CanonicalJson.decodeFromString(SessionManifest.serializer(), rawManifest)
+                        m.calibration?.mode?.name ?: "MARKER"
+                    } catch (_: Exception) {
+                        "MARKER"
+                    }
+                } else "MARKER"
+            } else null
 
             certJws = certificateIssuer.issueCoachVerifiedCertificate(
                 sessionId = sessionId,
@@ -144,7 +157,8 @@ class ReviewService(
                 coachId = coach.id,
                 coachName = coach.name,
                 reviewMethod = finalMethod,
-                reviewedAt = reviewedAt
+                reviewedAt = reviewedAt,
+                calibrationMode = calMode
             )
         }
 

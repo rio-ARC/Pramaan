@@ -4,13 +4,20 @@ import app.pramaan.core.manifest.CanonicalJson
 import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.model.Badge
 import app.pramaan.core.model.CheckResult
+import app.pramaan.core.model.TestType
+import app.pramaan.core.scoring.broadjump.BjAttempt
+import app.pramaan.core.scoring.broadjump.GroundCalibration
+import io.ktor.http.ContentDisposition
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
 import io.ktor.http.content.streamProvider
 import io.ktor.server.auth.authenticate
 import io.ktor.server.request.receiveMultipart
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondFile
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -49,6 +56,10 @@ data class AthleteSessionDetailResponse(
     val integrity: String,
     val status: String,
     val checks: List<CheckResult> = emptyList(),
+    val attempts: List<BjAttempt>? = null,
+    val calibration: GroundCalibration? = null,
+    val calibFrameUrl: String? = null,
+    val stillUrls: List<String>? = null,
     val reviewedByName: String? = null,
     val reviewReason: String? = null,
     val certificateJws: String? = null,
@@ -77,14 +88,29 @@ fun Route.configureAthleteRoutes(
                 multipart.forEachPart { part ->
                     when (part) {
                         is PartData.FileItem -> {
-                            val fileName = part.originalFileName ?: part.name ?: "file"
-                            val targetFile = File(tempFolder, fileName)
+                            val partName = part.name ?: ""
+                            val originalName = part.originalFileName ?: ""
+                            val rawName = originalName.ifBlank { partName.ifBlank { "file" } }
+
+                            val targetFile = if (partName == "calib_frame" || rawName.contains("calib_frame")) {
+                                File(tempFolder, "calib_frame.jpg")
+                            } else if (partName.startsWith("still_") || rawName.contains("still") || rawName.contains("landing") || rawName.startsWith("stills")) {
+                                val stillsDir = File(tempFolder, "stills").apply { if (!exists()) mkdirs() }
+                                val base = File(rawName).name
+                                val outName = if (base.endsWith(".jpg", ignoreCase = true)) base else "$base.jpg"
+                                File(stillsDir, outName)
+                            } else {
+                                val clean = File(rawName).name
+                                File(tempFolder, clean)
+                            }
+
+                            targetFile.parentFile?.mkdirs()
                             part.streamProvider().use { input ->
                                 FileOutputStream(targetFile).use { output ->
                                     input.copyTo(output)
                                 }
                             }
-                            if (fileName == "manifest.json") {
+                            if (targetFile.name == "manifest.json") {
                                 manifestBytes = targetFile.readBytes()
                             }
                         }
@@ -107,6 +133,19 @@ fun Route.configureAthleteRoutes(
                     return@post
                 }
 
+                // Rule 3: Test gating (§9.3)
+                if (manifest.test == TestType.BROAD_JUMP) {
+                    val broadAttempts = manifest.result.broadJumpAttempts ?: emptyList()
+                    if (manifest.result.best == null && broadAttempts.isEmpty()) {
+                        tempFolder.deleteRecursively()
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            ErrorResponse("NO_ATTEMPTS", "Cannot submit broad jump session with no attempts recorded")
+                        )
+                        return@post
+                    }
+                }
+
                 // Check account & hardware key binding (Spec 5.2)
                 val accountDeviceKey = account.devicePubkey?.trim() ?: ""
                 val manifestDeviceKey = manifest.devicePublicKey.trim()
@@ -120,7 +159,7 @@ fun Route.configureAthleteRoutes(
                 }
 
                 // Run verification
-                val verifyResult = SessionVerifier.verifyUploadedSession(tempFolder)
+                val verifyResult = SessionVerifier.verifyUploadedSession(tempFolder, account)
                 val sessionId = manifest.sessionId
 
                 val sessionFolder = File(uploadsDir, sessionId)
@@ -212,6 +251,26 @@ fun Route.configureAthleteRoutes(
             val verifyUrl = session.certificateJws?.let { "$baseUrl/v/$it" }
             val reviewerName = session.reviewedBy?.let { AccountRepo.getAccount(it)?.name }
 
+            val manifest = session.rawManifest?.let { raw ->
+                try {
+                    CanonicalJson.decodeFromString(SessionManifest.serializer(), raw)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            val sessionDir = File(uploadsDir, id)
+            val calibFrameUrl = if (File(sessionDir, "calib_frame.jpg").exists()) {
+                "$baseUrl/api/me/sessions/$id/files/calib_frame.jpg"
+            } else null
+
+            val stillsDir = File(sessionDir, "stills")
+            val stillUrls = if (stillsDir.exists() && stillsDir.isDirectory) {
+                stillsDir.listFiles()?.filter { it.isFile }?.sortedBy { it.name }?.map {
+                    "$baseUrl/api/me/sessions/$id/files/${it.name}"
+                }
+            } else null
+
             call.respond(
                 AthleteSessionDetailResponse(
                     id = session.id,
@@ -221,6 +280,10 @@ fun Route.configureAthleteRoutes(
                     integrity = session.integrity ?: "VERIFIED",
                     status = session.status,
                     checks = checks,
+                    attempts = manifest?.result?.broadJumpAttempts,
+                    calibration = manifest?.calibration,
+                    calibFrameUrl = calibFrameUrl,
+                    stillUrls = stillUrls,
                     reviewedByName = reviewerName,
                     reviewReason = session.reviewReason,
                     certificateJws = session.certificateJws,
@@ -229,6 +292,38 @@ fun Route.configureAthleteRoutes(
                     reviewedAt = session.reviewedAt
                 )
             )
+        }
+
+        // 4. File download endpoint for athlete
+        get("/api/me/sessions/{id}/files/{name}") {
+            val principal = call.ensureRole("ATHLETE") ?: return@get
+            val id = call.parameters["id"] ?: ""
+            val name = call.parameters["name"] ?: ""
+            if (name.contains("..")) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid file path"))
+                return@get
+            }
+
+            val session = ServerDb.getById(id)
+            if (session == null || session.athleteId != principal.accountId) {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Session not found"))
+                return@get
+            }
+
+            val sessionDir = File(uploadsDir, id)
+            val targetFile = File(sessionDir, name).takeIf { it.exists() && it.isFile }
+                ?: File(File(sessionDir, "stills"), name).takeIf { it.exists() && it.isFile }
+
+            if (targetFile == null || !targetFile.exists()) {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "File not found"))
+                return@get
+            }
+
+            call.response.header(
+                HttpHeaders.ContentDisposition,
+                ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, targetFile.name).toString()
+            )
+            call.respondFile(targetFile)
         }
     }
 }

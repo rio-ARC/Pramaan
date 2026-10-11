@@ -6,6 +6,8 @@ import app.pramaan.core.integrity.VerificationOutcome
 import app.pramaan.core.manifest.CanonicalJson
 import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.manifest.WitnessAttestation
+import app.pramaan.core.model.TestType
+import app.pramaan.core.scoring.broadjump.BroadJumpResult
 import java.io.File
 
 object SessionVerifier {
@@ -14,10 +16,14 @@ object SessionVerifier {
         val manifest: SessionManifest,
         val manifestSha256: String,
         val outcome: VerificationOutcome,
-        val witnessAttestation: WitnessAttestation?
+        val witnessAttestation: WitnessAttestation?,
+        val serverBroadJumpResult: BroadJumpResult? = null
     )
 
-    fun verifyUploadedSession(sessionFolder: File): ServerVerifyResult {
+    fun verifyUploadedSession(
+        sessionFolder: File,
+        account: AccountRecord? = null
+    ): ServerVerifyResult {
         val manifestFile = File(sessionFolder, "manifest.json")
         require(manifestFile.exists()) { "Missing manifest.json in session folder" }
 
@@ -28,7 +34,12 @@ object SessionVerifier {
         )
         val manifestSha256 = Sha256.hash(manifestBytes)
 
-        val outcome = IntegrityEngine.verifySessionFolder(sessionFolder)
+        val (outcome, serverBroadJumpResult) = if (manifest.test == TestType.BROAD_JUMP) {
+            val rescore = BroadJumpRescorer.rescore(sessionFolder, manifest, account)
+            rescore.outcome to rescore.serverResult
+        } else {
+            IntegrityEngine.verifySessionFolder(sessionFolder) to null
+        }
 
         val witnessFile = File(sessionFolder, "witness.json")
         val witnessAttestation = if (witnessFile.exists()) {
@@ -46,7 +57,8 @@ object SessionVerifier {
             manifest = manifest,
             manifestSha256 = manifestSha256,
             outcome = outcome,
-            witnessAttestation = witnessAttestation
+            witnessAttestation = witnessAttestation,
+            serverBroadJumpResult = serverBroadJumpResult
         )
     }
 }
