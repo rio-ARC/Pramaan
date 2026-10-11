@@ -8,6 +8,13 @@ object Feedback {
     const val FEEDBACK_SWING_ARMS = "Swing your arms up"
     const val FEEDBACK_GOOD = "Good technique"
 
+    const val FB_BJ_DEEPER_DIP = "fb_bj_deeper_dip"
+    const val FB_BJ_SWING_ARMS = "fb_bj_swing_arms"
+    const val FB_BJ_LAUNCH_HIGHER = "fb_bj_launch_higher"
+    const val FB_BJ_LAUNCH_FLATTER = "fb_bj_launch_flatter"
+    const val FB_BJ_REACH_FORWARD = "fb_bj_reach_forward"
+    const val FB_BJ_GOOD = "fb_bj_good"
+
     /**
      * Computes the angle in degrees between three landmarks at vertex B: A -> B -> C.
      */

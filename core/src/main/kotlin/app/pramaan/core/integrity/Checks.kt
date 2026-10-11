@@ -46,12 +46,16 @@ object Checks {
         val videoMatch = actualHashes.video == manifestHashes.video
         val framesMatch = actualHashes.frames == manifestHashes.frames
         val gyroMatch = actualHashes.gyro == manifestHashes.gyro
+        val calibMatch = manifestHashes.calibFrame == null || actualHashes.calibFrame == manifestHashes.calibFrame
+        val stillsMatch = manifestHashes.stills == null || actualHashes.stills == manifestHashes.stills
 
-        if (!videoMatch || !framesMatch || !gyroMatch) {
+        if (!videoMatch || !framesMatch || !gyroMatch || !calibMatch || !stillsMatch) {
             val mismatched = buildList {
                 if (!videoMatch) add("video.mp4")
                 if (!framesMatch) add("frames.jsonl")
                 if (!gyroMatch) add("gyro.jsonl")
+                if (!calibMatch) add("calib_frame.jpg")
+                if (!stillsMatch) add("stills")
             }.joinToString(", ")
 
             return CheckResult(

@@ -14,6 +14,9 @@ import app.pramaan.core.scoring.JumpResult
 import app.pramaan.core.scoring.SitUpAnalyzer
 import app.pramaan.core.scoring.SitUpResult
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.AthleteInfo
+import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.BroadJumpResult
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileInputStream
@@ -23,7 +26,8 @@ data class VerificationOutcome(
     val checks: List<CheckResult>,
     val badge: Badge,
     val jumpResult: JumpResult? = null,
-    val sitUpResult: SitUpResult? = null
+    val sitUpResult: SitUpResult? = null,
+    val broadJumpResult: BroadJumpResult? = null
 )
 
 /**
@@ -38,7 +42,7 @@ object IntegrityEngine {
      * Decides the single official Badge based on source, checks, and witness status.
      * PRD 5.1 rules:
      * - Tampered: Signature or any hash does not match (C1 fails)
-     * - Flagged: Gravity (C2), agreement (C3), or steadiness (C4) fails
+     * - Flagged: Gravity (C2), agreement (C3), steadiness (C4), or SBJ calibration (C5) fails
      * - Unsealed: Imported video, physics checks pass
      * - Witnessed: Sealed on this device, all checks pass, valid witness co-sign (C5 passes)
      * - Verified: Sealed on this device, all checks pass, no witness
@@ -53,7 +57,15 @@ object IntegrityEngine {
             return Badge.TAMPERED
         }
 
-        val physicsFailed = checks.filter { it.id in listOf("C2", "C3", "C4") }.any { !it.pass }
+        val physicsFailed = checks.any { check ->
+            if (check.id in listOf("C2", "C3", "C4")) {
+                !check.pass
+            } else if (check.id == "C5" && (check.reason == "CALIB_APPROX" || check.limit.contains("MARKER") || check.limit.contains("Diff"))) {
+                !check.pass
+            } else {
+                false
+            }
+        }
         if (physicsFailed) {
             return Badge.FLAGGED
         }
@@ -76,7 +88,9 @@ object IntegrityEngine {
         testType: TestType,
         source: String,
         jumpResult: JumpResult?,
-        gyroSamples: List<GyroSample>
+        gyroSamples: List<GyroSample>,
+        broadJumpResult: BroadJumpResult? = null,
+        athleteHeightCm: Double = 165.0
     ): Pair<List<CheckResult>, Badge> {
         val checks = mutableListOf<CheckResult>()
         val isImported = source.equals("IMPORT", ignoreCase = true)
@@ -89,6 +103,10 @@ object IntegrityEngine {
             val flightCm = bestAttempt?.flightCm ?: jumpResult.bestFlightCm
             val hipRiseCm = bestAttempt?.hipRiseCm ?: jumpResult.bestHipRiseCm
             checks.add(Checks.checkTwoMethodAgreement(flightCm, hipRiseCm))
+        } else if (testType == TestType.BROAD_JUMP && broadJumpResult != null) {
+            checks.add(BroadJumpChecks.checkGravity(broadJumpResult))
+            checks.add(BroadJumpChecks.checkHorizontalConsistency(broadJumpResult, athleteHeightCm))
+            checks.add(BroadJumpChecks.checkCalibrationAgreement(broadJumpResult))
         }
 
         checks.add(Checks.checkCameraSteady(gyroSamples, isImported = isImported))
@@ -104,13 +122,6 @@ object IntegrityEngine {
 
     /**
      * Re-verifies a complete session folder from disk.
-     * Expects:
-     * - manifest.json
-     * - manifest.sig
-     * - video.mp4
-     * - frames.jsonl
-     * - gyro.jsonl
-     * - witness.json (optional)
      */
     fun verifySessionFolder(folder: File): VerificationOutcome {
         val manifestFile = File(folder, "manifest.json")
@@ -119,6 +130,8 @@ object IntegrityEngine {
         val framesFile = File(folder, "frames.jsonl")
         val gyroFile = File(folder, "gyro.jsonl")
         val witnessFile = File(folder, "witness.json")
+        val calibFrameFile = File(folder, "calib_frame.jpg")
+        val stillsDir = File(folder, "stills")
 
         if (!manifestFile.exists()) {
             val check = CheckResult(
@@ -160,10 +173,25 @@ object IntegrityEngine {
             FileInputStream(gyroFile).use { Sha256.hash(it) }
         } else ""
 
+        val actualCalibHash = if (calibFrameFile.exists()) {
+            FileInputStream(calibFrameFile).use { Sha256.hash(it) }
+        } else null
+
+        val actualStillsMap = if (stillsDir.exists() && stillsDir.isDirectory) {
+            val map = mutableMapOf<String, String>()
+            stillsDir.listFiles()?.filter { it.isFile }?.forEach { f ->
+                val key = f.nameWithoutExtension
+                map[key] = FileInputStream(f).use { Sha256.hash(it) }
+            }
+            if (map.isNotEmpty()) map else null
+        } else null
+
         val actualHashes = FileHashes(
             video = actualVideoHash,
             frames = actualFramesHash,
-            gyro = actualGyroHash
+            gyro = actualGyroHash,
+            calibFrame = actualCalibHash,
+            stills = actualStillsMap
         )
 
         // C1: Tamper check
@@ -189,6 +217,7 @@ object IntegrityEngine {
 
         var jumpResult: JumpResult? = null
         var sitUpResult: SitUpResult? = null
+        var broadJumpResult: BroadJumpResult? = null
 
         val isImported = manifest.source.equals("IMPORT", ignoreCase = true)
 
@@ -206,12 +235,27 @@ object IntegrityEngine {
             checks.add(c3)
         } else if (manifest.test == TestType.SIT_UPS) {
             sitUpResult = SitUpAnalyzer.analyze(frames)
+        } else if (manifest.test == TestType.BROAD_JUMP && manifest.calibration != null) {
+            val rescoredBj = BroadJumpAnalyzer.analyze(
+                track = frames,
+                calib = manifest.calibration,
+                athlete = AthleteInfo(
+                    heightCm = manifest.athlete.heightCm,
+                    ageYears = manifest.athlete.age,
+                    sex = manifest.athlete.sex
+                )
+            )
+            broadJumpResult = rescoredBj
+
+            checks.add(BroadJumpChecks.checkGravity(rescoredBj))
+            checks.add(BroadJumpChecks.checkHorizontalConsistency(rescoredBj, manifest.athlete.heightCm))
+            checks.add(BroadJumpChecks.checkCalibrationAgreement(rescoredBj))
         }
 
         val c4 = Checks.checkCameraSteady(gyroSamples, isImported = isImported)
         checks.add(c4)
 
-        // C5: Witness check
+        // C5: Witness check (for non-broad jump tests or additional witness attestation)
         var witnessValid = false
         if (witnessFile.exists()) {
             val witness = try {
@@ -240,7 +284,8 @@ object IntegrityEngine {
             checks = checks,
             badge = badge,
             jumpResult = jumpResult,
-            sitUpResult = sitUpResult
+            sitUpResult = sitUpResult,
+            broadJumpResult = broadJumpResult
         )
     }
 }
