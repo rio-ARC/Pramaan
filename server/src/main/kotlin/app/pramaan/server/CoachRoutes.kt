@@ -183,7 +183,13 @@ fun Route.configureCoachRoutes(
                 }
 
                 if (row == null) {
-                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "Session not found"))
+                    call.respond(
+                        HttpStatusCode.NotFound,
+                        ErrorResponse(
+                            error = "SESSION_NOT_FOUND",
+                            message = "Session record has not arrived on server yet. Please ensure athlete has submitted."
+                        )
+                    )
                     return@get
                 }
 

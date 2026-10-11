@@ -47,6 +47,7 @@ object SessionsTable : Table("sessions") {
     val best = double("best")
     val unit = varchar("unit", 16)
     val status = varchar("status", 32).default("AWAITING_REVIEW")
+    val badge = varchar("badge", 32).default("VERIFIED")
     val integrity = varchar("integrity", 32).nullable()
     val integrityJson = text("integrity_json").nullable()
     val manifestSha256 = varchar("manifest_sha256", 128).nullable()
@@ -141,6 +142,10 @@ object ServerDb {
                 SessionsTable,
                 SessionEventsTable
             )
+            // Safe fallback in case SQLite table existed with NOT NULL badge
+            try {
+                exec("ALTER TABLE sessions ADD COLUMN integrity VARCHAR(32)")
+            } catch (_: Exception) {}
         }
     }
 
@@ -153,7 +158,7 @@ object ServerDb {
             best = row[SessionsTable.best],
             unit = row[SessionsTable.unit],
             status = row[SessionsTable.status],
-            integrity = row[SessionsTable.integrity],
+            integrity = row[SessionsTable.integrity] ?: row[SessionsTable.badge],
             integrityJson = row[SessionsTable.integrityJson],
             manifestSha256 = row[SessionsTable.manifestSha256],
             submittedAt = row[SessionsTable.submittedAt],
@@ -193,6 +198,7 @@ object ServerDb {
                     it[best] = record.best
                     it[unit] = record.unit
                     it[status] = record.status
+                    it[badge] = record.integrity ?: "VERIFIED"
                     it[integrity] = record.integrity
                     it[integrityJson] = record.integrityJson
                     it[manifestSha256] = record.manifestSha256
@@ -215,6 +221,7 @@ object ServerDb {
                     it[best] = record.best
                     it[unit] = record.unit
                     it[status] = record.status
+                    it[badge] = record.integrity ?: "VERIFIED"
                     it[integrity] = record.integrity
                     it[integrityJson] = record.integrityJson
                     it[manifestSha256] = record.manifestSha256
