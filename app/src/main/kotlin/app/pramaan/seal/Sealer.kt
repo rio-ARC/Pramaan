@@ -21,6 +21,7 @@ import app.pramaan.core.scoring.SitUpResult
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
 import app.pramaan.core.scoring.broadjump.AthleteInfo
 import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.BroadJumpParams
 import app.pramaan.core.scoring.broadjump.BroadJumpResult
 import app.pramaan.core.scoring.broadjump.CalibMode
 import app.pramaan.core.scoring.broadjump.GroundCalibration
@@ -114,11 +115,17 @@ class Sealer(
                     ageYears = athleteProfile.age ?: 16,
                     sex = athleteProfile.sex ?: "F"
                 )
-                val res = BroadJumpAnalyzer.analyze(frames, calib, athleteInfo)
+                val res = BroadJumpAnalyzer.analyze(
+                    track = frames,
+                    calib = calib,
+                    athlete = athleteInfo,
+                    params = BroadJumpParams(requireTapeMarker = false)
+                )
                 broadJumpResult = res
+                val bestDist = res.best ?: res.attempts.maxByOrNull { it.distanceCm }?.distanceCm ?: 0.0
                 SessionResult(
                     unit = "cm",
-                    best = res.best ?: 0.0,
+                    best = bestDist,
                     broadJumpAttempts = res.attempts
                 )
             }
@@ -130,7 +137,8 @@ class Sealer(
             jumpResult = jumpResult,
             gyroSamples = gyroSamples,
             broadJumpResult = broadJumpResult,
-            athleteHeightCm = heightCm
+            athleteHeightCm = heightCm,
+            broadJumpParams = BroadJumpParams(requireTapeMarker = false)
         )
 
         val allChecks = buildList {

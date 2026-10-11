@@ -43,6 +43,10 @@ class PoseEngine(
     private var recentFrameTimestamps = ArrayDeque<Long>()
     var measuredFps: Int = 30
         private set
+    var frameWidth: Int = 720
+        private set
+    var frameHeight: Int = 1280
+        private set
 
     init {
         setupLandmarker()
@@ -98,6 +102,8 @@ class PoseEngine(
             } else {
                 bitmap
             }
+            frameWidth = rotatedBitmap.width
+            frameHeight = rotatedBitmap.height
 
             val mpImage = BitmapImageBuilder(rotatedBitmap).build()
             landmarkerInstance.detectAsync(mpImage, timestampMs)

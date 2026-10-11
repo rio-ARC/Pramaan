@@ -18,6 +18,7 @@ import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
 import app.pramaan.core.scoring.broadjump.BroadJumpLiveTracker
 import app.pramaan.core.scoring.broadjump.CalibMode
 import app.pramaan.core.scoring.broadjump.Foul
+import app.pramaan.core.scoring.broadjump.JumpDirection
 import io.kotest.matchers.doubles.shouldBeBetween
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -430,5 +431,27 @@ class BroadJumpAnalyzerTest {
         decoded.test shouldBe TestType.BROAD_JUMP
         decoded.calibration?.mode shouldBe CalibMode.MARKER
         decoded.hashes.calibFrame shouldBe "calibHash"
+    }
+
+    @Test
+    fun `T-BJ-21 Height only jump toward image left evaluates valid jump distance`() {
+        val (baseTrack, baseCalib) = SyntheticBroadJump.generate(
+            heightCm = 160.0,
+            fps = 30,
+            attempts = listOf(SyntheticAttemptSpec(distanceCm = 175.0))
+        )
+        val (mirroredTrack, mirroredCalib) = SyntheticBroadJump.mirror(baseTrack, baseCalib)
+        val heightCalib = mirroredCalib.copy(
+            mode = CalibMode.HEIGHT_ONLY,
+            marker = null,
+            markerCm = null,
+            jumpDirection = JumpDirection.LEFT
+        )
+
+        val result = BroadJumpAnalyzer.analyze(mirroredTrack, heightCalib, athlete160)
+        result.best.shouldNotBeNull()
+        abs(result.best!! - 175.0).shouldBeBetween(0.0, 8.0, 0.001)
+        result.attempts.size shouldBe 1
+        result.attempts.first().valid shouldBe true
     }
 }

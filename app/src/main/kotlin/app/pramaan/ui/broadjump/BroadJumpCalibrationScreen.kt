@@ -5,9 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,19 +19,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Straighten
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -50,7 +48,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,19 +59,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pramaan.AppContainer
 import app.pramaan.core.manifest.PoseFrameJsonl
+import app.pramaan.core.model.PoseLandmarks
 import app.pramaan.core.model.TestType
 import app.pramaan.core.scoring.broadjump.AthleteInfo
 import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.BroadJumpParams
 import app.pramaan.core.scoring.broadjump.CalibMode
 import app.pramaan.core.scoring.broadjump.GroundCalibration
+import app.pramaan.core.scoring.broadjump.JumpDirection
 import app.pramaan.core.scoring.broadjump.NormPoint
 import app.pramaan.media.FrameExtractor
 import app.pramaan.media.StillRenderer
@@ -94,10 +94,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.hypot
 
 enum class ActivePoint {
     LINE,
@@ -116,12 +113,15 @@ fun BroadJumpCalibrationScreen(
     val videoFile = remember(sessionId) { container.sessionStore.getVideoFile(sessionId) }
     val framesFile = remember(sessionId) { container.sessionStore.getFramesFile(sessionId) }
 
-    // Calibration points
+    // Calibration mode: default is Height-Only (No Tape) as requested by user
+    var isHeightOnly by remember { mutableStateOf(true) }
     var activePoint by remember { mutableStateOf(ActivePoint.LINE) }
-    var linePoint by remember { mutableStateOf<NormPoint?>(null) }
+    var jumpDirection by remember { mutableStateOf(JumpDirection.LEFT) }
+
+    // Calibration points
+    var linePoint by remember { mutableStateOf<NormPoint?>(NormPoint(0.70, 0.80)) }
     var markerPoint by remember { mutableStateOf<NormPoint?>(null) }
     var markerCm by remember { mutableDoubleStateOf(200.0) }
-    var isHeightOnly by remember { mutableStateOf(false) }
 
     // Video frame scrubber state
     var minTimeNs by remember { mutableLongStateOf(0L) }
@@ -130,17 +130,19 @@ fun BroadJumpCalibrationScreen(
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isLoadingFrame by remember { mutableStateOf(false) }
 
-    // Zoom & Pan state
-    var zoomScale by remember { mutableFloatStateOf(1f) }
-    var panOffset by remember { mutableStateOf(Offset.Zero) }
-
     // Sealing / Analysis progress
     var isAnalyzing by remember { mutableStateOf(false) }
     var analyzeStepText by remember { mutableStateOf("") }
 
-    // 1. Initial frame load (read first frame timestamp from frames.jsonl)
+    // Athlete profile
+    var athleteHeightCm by remember { mutableDoubleStateOf(165.0) }
+
+    // 1. Initial frame load and smart auto-detection of stance & jump direction
     LaunchedEffect(sessionId) {
         withContext(Dispatchers.IO) {
+            val prof = container.authStore.getProfile()
+            athleteHeightCm = prof?.heightCm ?: 165.0
+
             val frames = if (framesFile.exists()) {
                 framesFile.reader().use { PoseFrameJsonl.readAll(it) }
             } else emptyList()
@@ -148,8 +150,53 @@ fun BroadJumpCalibrationScreen(
             if (frames.isNotEmpty()) {
                 minTimeNs = frames.first().t
                 maxTimeNs = frames.last().t
-                // Default to ~0.5s after start (athlete stationary)
                 currentTimeNs = (minTimeNs + 500_000_000L).coerceAtMost(maxTimeNs)
+
+                // Detect athlete stance position in early frames
+                val earlyFrames = frames.take(minOf(45, frames.size))
+                val toeXs = mutableListOf<Double>()
+                val heelXs = mutableListOf<Double>()
+                val hipXs = mutableListOf<Double>()
+                for (f in earlyFrames) {
+                    val tL = f.landmarks[PoseLandmarks.LEFT_FOOT_INDEX]
+                    val tR = f.landmarks[PoseLandmarks.RIGHT_FOOT_INDEX]
+                    val hL = f.landmarks[PoseLandmarks.LEFT_HEEL]
+                    val hR = f.landmarks[PoseLandmarks.RIGHT_HEEL]
+                    val hipL = f.landmarks[PoseLandmarks.LEFT_HIP]
+                    val hipR = f.landmarks[PoseLandmarks.RIGHT_HIP]
+                    if (tL.visibility >= 0.25f) toeXs.add(tL.x.toDouble())
+                    if (tR.visibility >= 0.25f) toeXs.add(tR.x.toDouble())
+                    if (hL.visibility >= 0.25f) heelXs.add(hL.x.toDouble())
+                    if (hR.visibility >= 0.25f) heelXs.add(hR.x.toDouble())
+                    if (hipL.visibility >= 0.25f) hipXs.add(hipL.x.toDouble())
+                    if (hipR.visibility >= 0.25f) hipXs.add(hipR.x.toDouble())
+                }
+
+                if (toeXs.isNotEmpty()) {
+                    val medToeX = toeXs.sorted()[toeXs.size / 2]
+                    val medHeelX = if (heelXs.isNotEmpty()) heelXs.sorted()[heelXs.size / 2] else medToeX
+
+                    // If toes are to the left of heels or standing in right half of video, athlete faces/jumps LEFT
+                    if (medToeX < medHeelX || medToeX > 0.50) {
+                        jumpDirection = JumpDirection.LEFT
+                        linePoint = NormPoint(medToeX, 0.82)
+                    } else {
+                        jumpDirection = JumpDirection.RIGHT
+                        linePoint = NormPoint(medToeX, 0.82)
+                    }
+                } else if (hipXs.isNotEmpty()) {
+                    val medHipX = hipXs.sorted()[hipXs.size / 2]
+                    if (medHipX > 0.50) {
+                        jumpDirection = JumpDirection.LEFT
+                        linePoint = NormPoint(medHipX - 0.05, 0.82)
+                    } else {
+                        jumpDirection = JumpDirection.RIGHT
+                        linePoint = NormPoint(medHipX + 0.05, 0.82)
+                    }
+                } else {
+                    linePoint = NormPoint(0.70, 0.82)
+                    jumpDirection = JumpDirection.LEFT
+                }
             }
         }
         isLoadingFrame = true
@@ -171,50 +218,11 @@ fun BroadJumpCalibrationScreen(
         }
     }
 
-    // Nudge active point by 1 pixel
-    fun nudge(dx: Float, dy: Float) {
-        val bmp = currentBitmap ?: return
-        val w = bmp.width.toFloat()
-        val h = bmp.height.toFloat()
-        val dxNorm = dx / (w * zoomScale)
-        val dyNorm = dy / (h * zoomScale)
-
-        if (activePoint == ActivePoint.LINE) {
-            val p = linePoint ?: NormPoint(0.3, 0.8)
-            linePoint = NormPoint(
-                (p.x + dxNorm).coerceIn(0.0, 1.0),
-                (p.y + dyNorm).coerceIn(0.0, 1.0)
-            )
-        } else {
-            val p = markerPoint ?: NormPoint(0.7, 0.8)
-            markerPoint = NormPoint(
-                (p.x + dxNorm).coerceIn(0.0, 1.0),
-                (p.y + dyNorm).coerceIn(0.0, 1.0)
-            )
-        }
-    }
-
-    // Live validation checks
-    val bmpW = currentBitmap?.width ?: 1280
-    val bmpH = currentBitmap?.height ?: 720
-    val linePx = linePoint?.let { Offset((it.x * bmpW).toFloat(), (it.y * bmpH).toFloat()) }
-    val markPx = markerPoint?.let { Offset((it.x * bmpW).toFloat(), (it.y * bmpH).toFloat()) }
-
-    val distancePx = if (linePx != null && markPx != null) {
-        hypot((markPx.x - linePx.x).toDouble(), (markPx.y - linePx.y).toDouble())
-    } else null
-
-    val tiltDeg = if (linePx != null && markPx != null) {
-        val dy = (markPx.y - linePx.y).toDouble()
-        val dx = (markPx.x - linePx.x).toDouble()
-        abs(atan2(dy, dx) * 180.0 / PI)
-    } else 0.0
-
-    val isAhead = if (linePx != null && markPx != null) markPx.x > linePx.x else false
-    val isMarkerValid = if (isHeightOnly) {
+    // Validation checks
+    val isReadyToEvaluate = if (isHeightOnly) {
         linePoint != null
     } else {
-        linePoint != null && markerPoint != null && isAhead && tiltDeg <= 20.0 && (distancePx ?: 0.0) >= 50.0
+        linePoint != null && markerPoint != null && abs((markerPoint!!.x - linePoint!!.x)) > 0.05
     }
 
     Scaffold(
@@ -223,12 +231,12 @@ fun BroadJumpCalibrationScreen(
                 title = {
                     Column {
                         Text(
-                            text = "Calibrate Ground Tape",
+                            text = "Set Takeoff Line",
                             style = PramaanTypography.titleMedium,
                             color = PramaanOnSurface
                         )
                         Text(
-                            text = if (isHeightOnly) "Mode: Height Only (Approx)" else "Tap line & ${markerCm.toInt()} cm mark",
+                            text = if (isHeightOnly) "Mode: No Tape (Athlete Height Scaled)" else "Mode: Tape Measure Calibration",
                             style = PramaanTypography.bodySmall,
                             color = PramaanOutline
                         )
@@ -273,14 +281,13 @@ fun BroadJumpCalibrationScreen(
                         }
                     } else {
                         PramaanButton(
-                            text = "Confirm & Analyze Jumps",
+                            text = if (isHeightOnly) "Confirm Start Line & Evaluate Jump" else "Confirm Ground Tape & Evaluate",
                             icon = Icons.Default.Check,
                             onClick = {
                                 isAnalyzing = true
                                 scope.launch {
                                     withContext(Dispatchers.IO) {
-                                        analyzeStepText = "Saving calibration frame..."
-                                        // 1. Save calibration frame JPG
+                                        analyzeStepText = "Saving start line calibration..."
                                         val calibBmp = currentBitmap
                                         val calibFile = container.sessionStore.getCalibFrameFile(sessionId)
                                         if (calibBmp != null) {
@@ -289,15 +296,16 @@ fun BroadJumpCalibrationScreen(
                                             }
                                         }
 
-                                        analyzeStepText = "Analyzing pose trajectory..."
+                                        analyzeStepText = "Analyzing jump trajectory..."
                                         val calib = GroundCalibration(
                                             mode = if (isHeightOnly) CalibMode.HEIGHT_ONLY else CalibMode.MARKER,
                                             frameW = calibBmp?.width ?: 1280,
                                             frameH = calibBmp?.height ?: 720,
                                             calibFrameTNs = currentTimeNs,
-                                            line = linePoint ?: NormPoint(0.25, 0.8),
+                                            line = linePoint ?: NormPoint(0.70, 0.80),
                                             marker = if (isHeightOnly) null else markerPoint,
-                                            markerCm = if (isHeightOnly) null else markerCm
+                                            markerCm = if (isHeightOnly) null else markerCm,
+                                            jumpDirection = jumpDirection
                                         )
 
                                         val frames = if (framesFile.exists()) {
@@ -308,21 +316,27 @@ fun BroadJumpCalibrationScreen(
                                             id = "ATH-DEMO",
                                             role = "ATHLETE",
                                             name = "Athlete",
-                                            sex = "F",
-                                            heightCm = 165.0,
+                                            sex = "M",
+                                            heightCm = athleteHeightCm,
                                             weightKg = 55.0
                                         )
 
                                         val athleteInfo = AthleteInfo(
-                                            heightCm = prof.heightCm ?: 165.0,
+                                            heightCm = prof.heightCm ?: athleteHeightCm,
                                             ageYears = prof.age ?: 16,
-                                            sex = prof.sex ?: "F"
+                                            sex = prof.sex ?: "M"
                                         )
 
-                                        val result = BroadJumpAnalyzer.analyze(frames, calib, athleteInfo)
+                                        val result = BroadJumpAnalyzer.analyze(
+                                            track = frames,
+                                            calib = calib,
+                                            athlete = athleteInfo,
+                                            params = BroadJumpParams(requireTapeMarker = false)
+                                        )
 
                                         analyzeStepText = "Rendering landing stills..."
                                         val stillsDir = container.sessionStore.getStillsDir(sessionId)
+                                        stillsDir.mkdirs()
                                         result.attempts.forEach { att ->
                                             val stillBmp = FrameExtractor.frameAt(videoFile, att.contact.tNs)
                                             if (stillBmp != null) {
@@ -344,7 +358,7 @@ fun BroadJumpCalibrationScreen(
                                     onCalibrationComplete(sessionId)
                                 }
                             },
-                            enabled = isMarkerValid
+                            enabled = isReadyToEvaluate
                         )
                     }
                 }
@@ -356,43 +370,112 @@ fun BroadJumpCalibrationScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            // 1. Interactive Video Frame Canvas with Zoom & Tap
+            // 1. Mode Switcher (Two clear, friendly tabs)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF1F5F9))
+                    .padding(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isHeightOnly) PramaanNavy else Color.Transparent)
+                        .clickable {
+                            isHeightOnly = true
+                            activePoint = ActivePoint.LINE
+                        }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "⚡ No Tape (Athlete Height)",
+                        style = PramaanTypography.labelMedium,
+                        fontWeight = if (isHeightOnly) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isHeightOnly) Color.White else PramaanOnSurface
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (!isHeightOnly) Color(0xFF2563EB) else Color.Transparent)
+                        .clickable {
+                            isHeightOnly = false
+                            if (markerPoint == null) {
+                                val offset = if (jumpDirection == JumpDirection.LEFT) -0.30 else 0.30
+                                markerPoint = NormPoint(
+                                    ((linePoint?.x ?: 0.5) + offset).coerceIn(0.05, 0.95),
+                                    linePoint?.y ?: 0.8
+                                )
+                            }
+                        }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "📏 With Tape Measure",
+                        style = PramaanTypography.labelMedium,
+                        fontWeight = if (!isHeightOnly) FontWeight.Bold else FontWeight.Normal,
+                        color = if (!isHeightOnly) Color.White else PramaanOnSurface
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 2. Video Frame Canvas
+            val bmpAspect = if (currentBitmap != null && currentBitmap!!.height > 0) {
+                currentBitmap!!.width.toFloat() / currentBitmap!!.height.toFloat()
+            } else (16f / 9f)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
+                    .aspectRatio(bmpAspect.coerceIn(0.56f, 1.8f))
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color.Black)
             ) {
                 if (currentBitmap != null) {
                     val bmp = currentBitmap!!
-                    val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
-                        zoomScale = (zoomScale * zoomChange).coerceIn(1f, 6f)
-                        panOffset += offsetChange
-                    }
 
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
-                            .transformable(state = transformState)
-                            .pointerInput(activePoint, zoomScale, panOffset) {
+                            .pointerInput(activePoint, isHeightOnly) {
                                 detectTapGestures { tapOffset ->
                                     val canvasW = size.width.toFloat()
                                     val canvasH = size.height.toFloat()
+                                    val normX = (tapOffset.x / canvasW).coerceIn(0f, 1f).toDouble()
+                                    val normY = (tapOffset.y / canvasH).coerceIn(0f, 1f).toDouble()
 
-                                    // Invert transform to get normalized coordinates [0, 1]
-                                    val normX = ((tapOffset.x - panOffset.x) / (canvasW * zoomScale)).coerceIn(0f, 1f)
-                                    val normY = ((tapOffset.y - panOffset.y) / (canvasH * zoomScale)).coerceIn(0f, 1f)
-
-                                    if (activePoint == ActivePoint.LINE) {
-                                        linePoint = NormPoint(normX.toDouble(), normY.toDouble())
+                                    if (isHeightOnly || activePoint == ActivePoint.LINE) {
+                                        linePoint = NormPoint(normX, normY)
                                         if (!isHeightOnly && markerPoint == null) {
                                             activePoint = ActivePoint.MARKER
                                         }
                                     } else {
-                                        markerPoint = NormPoint(normX.toDouble(), normY.toDouble())
+                                        markerPoint = NormPoint(normX, normY)
+                                    }
+                                }
+                            }
+                            .pointerInput(activePoint, isHeightOnly) {
+                                detectDragGestures { change, _ ->
+                                    val canvasW = size.width.toFloat()
+                                    val canvasH = size.height.toFloat()
+                                    val normX = (change.position.x / canvasW).coerceIn(0f, 1f).toDouble()
+                                    val normY = (change.position.y / canvasH).coerceIn(0f, 1f).toDouble()
+
+                                    if (isHeightOnly || activePoint == ActivePoint.LINE) {
+                                        linePoint = NormPoint(normX, normY)
+                                    } else {
+                                        markerPoint = NormPoint(normX, normY)
                                     }
                                 }
                             }
@@ -403,55 +486,77 @@ fun BroadJumpCalibrationScreen(
                         // Draw background frame image
                         drawImage(
                             image = bmp.asImageBitmap(),
-                            dstOffset = IntOffset(panOffset.x.toInt(), panOffset.y.toInt()),
-                            dstSize = IntSize((canvasW * zoomScale).toInt(), (canvasH * zoomScale).toInt())
+                            dstOffset = IntOffset.Zero,
+                            dstSize = IntSize(canvasW.toInt(), canvasH.toInt())
                         )
 
-                        // Helper to convert normalized coordinate to canvas space
                         fun normToCanvas(p: NormPoint): Offset {
-                            return Offset(
-                                (p.x * canvasW * zoomScale + panOffset.x).toFloat(),
-                                (p.y * canvasH * zoomScale + panOffset.y).toFloat()
-                            )
+                            return Offset((p.x * canvasW).toFloat(), (p.y * canvasH).toFloat())
                         }
 
-                        // Draw Takeoff Line (Orange Crosshair)
+                        // Draw Takeoff Line (Orange)
                         linePoint?.let { lp ->
                             val c = normToCanvas(lp)
-                            // Vertical guide line
+                            // Thick guide line
                             drawLine(
                                 color = PramaanSaffron,
                                 start = Offset(c.x, 0f),
                                 end = Offset(c.x, canvasH),
-                                strokeWidth = 2f
+                                strokeWidth = 5f
                             )
-                            drawCircle(color = PramaanSaffron, radius = 10f, center = c)
-                            drawCircle(color = Color.White, radius = 4f, center = c)
+                            // Circular grab handle
+                            drawCircle(color = PramaanSaffron, radius = 18f, center = c)
+                            drawCircle(color = Color.White, radius = 8f, center = c)
+
+                            // Arrow along jump direction
+                            val arrowDir = if (jumpDirection == JumpDirection.LEFT) -1f else 1f
+                            val arrowStartX = c.x + arrowDir * 24f
+                            val arrowEndX = c.x + arrowDir * 70f
+                            val arrowY = c.y - 25f
+                            drawLine(
+                                color = PramaanSaffron,
+                                start = Offset(arrowStartX, arrowY),
+                                end = Offset(arrowEndX, arrowY),
+                                strokeWidth = 4f
+                            )
+                            drawLine(
+                                color = PramaanSaffron,
+                                start = Offset(arrowEndX, arrowY),
+                                end = Offset(arrowEndX - arrowDir * 14f, arrowY - 10f),
+                                strokeWidth = 4f
+                            )
+                            drawLine(
+                                color = PramaanSaffron,
+                                start = Offset(arrowEndX, arrowY),
+                                end = Offset(arrowEndX - arrowDir * 14f, arrowY + 10f),
+                                strokeWidth = 4f
+                            )
                         }
 
-                        // Draw Tape Marker (Blue Crosshair)
-                        markerPoint?.let { mp ->
-                            val c = normToCanvas(mp)
-                            drawLine(
-                                color = Color(0xFF2563EB),
-                                start = Offset(c.x, 0f),
-                                end = Offset(c.x, canvasH),
-                                strokeWidth = 2f
-                            )
-                            drawCircle(color = Color(0xFF2563EB), radius = 10f, center = c)
-                            drawCircle(color = Color.White, radius = 4f, center = c)
-                        }
+                        // Draw Tape Marker (Blue) if in Tape mode
+                        if (!isHeightOnly) {
+                            markerPoint?.let { mp ->
+                                val c = normToCanvas(mp)
+                                drawLine(
+                                    color = Color(0xFF2563EB),
+                                    start = Offset(c.x, 0f),
+                                    end = Offset(c.x, canvasH),
+                                    strokeWidth = 4f
+                                )
+                                drawCircle(color = Color(0xFF2563EB), radius = 16f, center = c)
+                                drawCircle(color = Color.White, radius = 7f, center = c)
+                            }
 
-                        // Draw Connecting Calibration Axis Line
-                        if (linePoint != null && markerPoint != null) {
-                            val cLine = normToCanvas(linePoint!!)
-                            val cMark = normToCanvas(markerPoint!!)
-                            drawLine(
-                                color = PramaanEmerald,
-                                start = cLine,
-                                end = cMark,
-                                strokeWidth = 3f
-                            )
+                            if (linePoint != null && markerPoint != null) {
+                                val cLine = normToCanvas(linePoint!!)
+                                val cMark = normToCanvas(markerPoint!!)
+                                drawLine(
+                                    color = PramaanEmerald,
+                                    start = cLine,
+                                    end = cMark,
+                                    strokeWidth = 3f
+                                )
+                            }
                         }
                     }
                 }
@@ -465,17 +570,17 @@ fun BroadJumpCalibrationScreen(
                     }
                 }
 
-                // Zoom Level Badge
+                // Instruction Overlay Badge on Canvas
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
+                        .align(Alignment.TopStart)
                         .padding(8.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0x99000000))
+                        .background(Color(0xCC000000))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "${String.format("%.1f", zoomScale)}x Zoom",
+                        text = if (isHeightOnly) "Tap or drag line to athlete's toes" else "Tap 1: Line, Tap 2: Tape mark",
                         color = Color.White,
                         fontSize = 11.sp
                     )
@@ -484,13 +589,88 @@ fun BroadJumpCalibrationScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 2. Point Selection Steps & Nudge Controls
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 3. Jump Direction Control (Super easy Left vs Right toggle)
+            PramaanCard {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.DirectionsRun,
+                                contentDescription = null,
+                                tint = PramaanSaffron,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Athlete Jump Direction",
+                                style = PramaanTypography.labelMedium,
+                                color = PramaanOnSurface
+                            )
+                        }
+
+                        // Segmented Left / Right Buttons
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFF1F5F9))
+                                .padding(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (jumpDirection == JumpDirection.LEFT) PramaanSaffron else Color.Transparent)
+                                    .clickable { jumpDirection = JumpDirection.LEFT }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "⇦ Left",
+                                    color = if (jumpDirection == JumpDirection.LEFT) Color.White else PramaanOnSurface,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (jumpDirection == JumpDirection.RIGHT) PramaanSaffron else Color.Transparent)
+                                    .clickable { jumpDirection = JumpDirection.RIGHT }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Right ⇨",
+                                    color = if (jumpDirection == JumpDirection.RIGHT) Color.White else PramaanOnSurface,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    if (isHeightOnly) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Calibrating distance using athlete's registered height (${athleteHeightCm.toInt()} cm). No tape measure needed.",
+                            style = PramaanTypography.bodySmall,
+                            color = PramaanOutline
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 4. In Tape Mode: Point Selectors & Marker Length Chips
+            if (!isHeightOnly) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     FilterChip(
                         selected = activePoint == ActivePoint.LINE,
                         onClick = { activePoint = ActivePoint.LINE },
@@ -501,43 +681,19 @@ fun BroadJumpCalibrationScreen(
                         )
                     )
 
-                    if (!isHeightOnly) {
-                        FilterChip(
-                            selected = activePoint == ActivePoint.MARKER,
-                            onClick = { activePoint = ActivePoint.MARKER },
-                            label = { Text("2. Marker (${markerCm.toInt()} cm)") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFDBEAFE),
-                                selectedLabelColor = Color(0xFF2563EB)
-                            )
+                    FilterChip(
+                        selected = activePoint == ActivePoint.MARKER,
+                        onClick = { activePoint = ActivePoint.MARKER },
+                        label = { Text("2. Tape Mark (${markerCm.toInt()} cm)") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFDBEAFE),
+                            selectedLabelColor = Color(0xFF2563EB)
                         )
-                    }
+                    )
                 }
 
-                // 1-Pixel Nudge Pad
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFE2E8F0))
-                        .padding(2.dp)
-                ) {
-                    IconButton(onClick = { nudge(0f, -1f) }, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.ArrowUpward, contentDescription = "Up", modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = { nudge(0f, 1f) }, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.ArrowDownward, contentDescription = "Down", modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = { nudge(-1f, 0f) }, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Left", modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = { nudge(1f, 0f) }, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.ArrowForward, contentDescription = "Right", modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
+                Spacer(modifier = Modifier.height(6.dp))
 
-            // Marker Length Chips
-            if (!isHeightOnly) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -560,36 +716,11 @@ fun BroadJumpCalibrationScreen(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 3. Frame Scrubber Slider
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Pick Clear Frame:",
-                    style = PramaanTypography.labelSmall,
-                    color = PramaanOutline
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Slider(
-                    value = currentTimeNs.toFloat(),
-                    onValueChange = { seekTo(it.toLong()) },
-                    valueRange = minTimeNs.toFloat()..maxTimeNs.toFloat(),
-                    modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = PramaanSaffron,
-                        activeTrackColor = PramaanSaffron
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 4. Live Validity Diagnostics Card
+            // 5. Video Frame Scrubber Slider
             PramaanCard {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
@@ -597,70 +728,51 @@ fun BroadJumpCalibrationScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Calibration Validation",
-                            style = PramaanTypography.labelLarge,
-                            color = PramaanOnSurface
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isMarkerValid) Color(0xFFDCFCE7) else Color(0xFFFFEDD5))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Videocam,
+                                contentDescription = null,
+                                tint = PramaanNavy,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isMarkerValid) "VALID ✓" else "ADJUST POINTS",
-                                style = PramaanTypography.labelSmall,
-                                color = if (isMarkerValid) PramaanEmerald else PramaanSaffron
+                                text = "Select Starting Stance Frame",
+                                style = PramaanTypography.labelMedium,
+                                color = PramaanOnSurface
                             )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (isHeightOnly) {
+                        val timeSec = String.format("%.2f s", (currentTimeNs - minTimeNs) / 1e9)
                         Text(
-                            text = "Height-only fallback enabled. Line position set. Result will be marked APPROX (not certifiable).",
-                            style = PramaanTypography.bodySmall,
+                            text = timeSec,
+                            style = PramaanTypography.labelSmall,
                             color = PramaanOutline
                         )
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Span: ${distancePx?.toInt() ?: 0} px",
-                                style = PramaanTypography.bodySmall,
-                                color = PramaanOutline
-                            )
-                            Text(
-                                text = "Tilt: ${String.format("%.1f", tiltDeg)}° ${if (tiltDeg <= 20.0) "✓" else "✕ (>20°)"}",
-                                style = PramaanTypography.bodySmall,
-                                color = if (tiltDeg <= 20.0) PramaanEmerald else PramaanError
-                            )
-                            Text(
-                                text = if (isAhead) "Ahead ✓" else "Behind ✕",
-                                style = PramaanTypography.bodySmall,
-                                color = if (isAhead) PramaanEmerald else PramaanError
-                            )
-                        }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                    // Secondary fallback switch
+                    Slider(
+                        value = currentTimeNs.toFloat(),
+                        onValueChange = { seekTo(it.toLong()) },
+                        valueRange = minTimeNs.toFloat()..maxTimeNs.toFloat(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = PramaanSaffron,
+                            activeTrackColor = PramaanSaffron
+                        )
+                    )
+
                     Text(
-                        text = if (isHeightOnly) "Switch back to tape marker calibration" else "No tape? Use height-only fallback (approximate)",
-                        style = PramaanTypography.labelSmall,
-                        color = Color(0xFF2563EB),
-                        modifier = Modifier.clickable {
-                            isHeightOnly = !isHeightOnly
-                            if (isHeightOnly) activePoint = ActivePoint.LINE
-                        }
+                        text = "Slide until athlete is standing still at the take-off line before jumping.",
+                        style = PramaanTypography.bodySmall,
+                        color = PramaanOutline
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }

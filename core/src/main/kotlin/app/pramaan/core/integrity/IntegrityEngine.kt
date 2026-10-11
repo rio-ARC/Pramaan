@@ -16,6 +16,7 @@ import app.pramaan.core.scoring.SitUpResult
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
 import app.pramaan.core.scoring.broadjump.AthleteInfo
 import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.BroadJumpParams
 import app.pramaan.core.scoring.broadjump.BroadJumpResult
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -90,7 +91,8 @@ object IntegrityEngine {
         jumpResult: JumpResult?,
         gyroSamples: List<GyroSample>,
         broadJumpResult: BroadJumpResult? = null,
-        athleteHeightCm: Double = 165.0
+        athleteHeightCm: Double = 165.0,
+        broadJumpParams: BroadJumpParams = BroadJumpParams()
     ): Pair<List<CheckResult>, Badge> {
         val checks = mutableListOf<CheckResult>()
         val isImported = source.equals("IMPORT", ignoreCase = true)
@@ -104,9 +106,9 @@ object IntegrityEngine {
             val hipRiseCm = bestAttempt?.hipRiseCm ?: jumpResult.bestHipRiseCm
             checks.add(Checks.checkTwoMethodAgreement(flightCm, hipRiseCm))
         } else if (testType == TestType.BROAD_JUMP && broadJumpResult != null) {
-            checks.add(BroadJumpChecks.checkGravity(broadJumpResult))
-            checks.add(BroadJumpChecks.checkHorizontalConsistency(broadJumpResult, athleteHeightCm))
-            checks.add(BroadJumpChecks.checkCalibrationAgreement(broadJumpResult))
+            checks.add(BroadJumpChecks.checkGravity(broadJumpResult, broadJumpParams))
+            checks.add(BroadJumpChecks.checkHorizontalConsistency(broadJumpResult, athleteHeightCm, broadJumpParams))
+            checks.add(BroadJumpChecks.checkCalibrationAgreement(broadJumpResult, broadJumpParams))
         }
 
         checks.add(Checks.checkCameraSteady(gyroSamples, isImported = isImported))
@@ -236,6 +238,7 @@ object IntegrityEngine {
         } else if (manifest.test == TestType.SIT_UPS) {
             sitUpResult = SitUpAnalyzer.analyze(frames)
         } else if (manifest.test == TestType.BROAD_JUMP && manifest.calibration != null) {
+            val bjParams = BroadJumpParams(requireTapeMarker = false)
             val rescoredBj = BroadJumpAnalyzer.analyze(
                 track = frames,
                 calib = manifest.calibration,
@@ -243,13 +246,14 @@ object IntegrityEngine {
                     heightCm = manifest.athlete.heightCm,
                     ageYears = manifest.athlete.age,
                     sex = manifest.athlete.sex
-                )
+                ),
+                params = bjParams
             )
             broadJumpResult = rescoredBj
 
-            checks.add(BroadJumpChecks.checkGravity(rescoredBj))
-            checks.add(BroadJumpChecks.checkHorizontalConsistency(rescoredBj, manifest.athlete.heightCm))
-            checks.add(BroadJumpChecks.checkCalibrationAgreement(rescoredBj))
+            checks.add(BroadJumpChecks.checkGravity(rescoredBj, bjParams))
+            checks.add(BroadJumpChecks.checkHorizontalConsistency(rescoredBj, manifest.athlete.heightCm, bjParams))
+            checks.add(BroadJumpChecks.checkCalibrationAgreement(rescoredBj, bjParams))
         }
 
         val c4 = Checks.checkCameraSteady(gyroSamples, isImported = isImported)

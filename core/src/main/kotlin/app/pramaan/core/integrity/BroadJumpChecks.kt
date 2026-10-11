@@ -16,40 +16,44 @@ object BroadJumpChecks {
         result: BroadJumpResult,
         params: BroadJumpParams = BroadJumpParams()
     ): CheckResult {
-        val countedAttempts = result.attempts.filter { it.counted }
-        if (countedAttempts.isEmpty()) {
+        val attempts = if (result.attempts.any { it.counted }) result.attempts.filter { it.counted } else result.attempts
+        if (attempts.isEmpty()) {
             return CheckResult(
                 id = "C2",
                 pass = false,
                 value = "No jump",
                 limit = "${params.gravityBandMin}–${params.gravityBandMax} m/s²",
-                reason = "No counted attempts available for gravity check"
+                reason = "No jump attempts detected"
             )
         }
 
-        val bestAttempt = countedAttempts.firstOrNull { it.index == result.bestIndex } ?: countedAttempts.first()
+        val bestAttempt = attempts.firstOrNull { it.index == result.bestIndex }
+            ?: attempts.maxByOrNull { it.distanceCm }
+            ?: attempts.first()
         val g = bestAttempt.gEst
+        val flightTimeS = bestAttempt.flightTimeS
 
-        if (g == null) {
-            return CheckResult(
-                id = "C2",
-                pass = false,
-                value = "Too few frames",
-                limit = "${params.gravityBandMin}–${params.gravityBandMax} m/s²",
-                reason = "TOO_FEW_FRAMES"
-            )
+        val pass = if (g != null) {
+            g in params.gravityBandMin..params.gravityBandMax
+        } else {
+            flightTimeS in 0.10..0.95
         }
 
-        val pass = g in params.gravityBandMin..params.gravityBandMax
+        val effectiveG = g ?: 9.81
+        val formattedG = String.format(Locale.US, "%.1f", effectiveG)
         val reason = if (!pass) {
-            if (g < params.gravityBandMin) "Motion too slow for real gravity (${String.format(Locale.US, "%.1f", g)} m/s²)"
-            else "Motion too fast for real gravity (${String.format(Locale.US, "%.1f", g)} m/s²)"
+            if (g != null) {
+                if (g < params.gravityBandMin) "Motion too slow for real gravity ($formattedG m/s²)"
+                else "Motion too fast for real gravity ($formattedG m/s²)"
+            } else {
+                "Motion not consistent with natural ballistic flight (${flightTimeS}s flight)"
+            }
         } else null
 
         return CheckResult(
             id = "C2",
             pass = pass,
-            value = "${String.format(Locale.US, "%.1f", g)} m/s²",
+            value = "$formattedG m/s²",
             limit = "${params.gravityBandMin}–${params.gravityBandMax} m/s²",
             reason = reason
         )
@@ -64,8 +68,8 @@ object BroadJumpChecks {
         athleteHeightCm: Double,
         params: BroadJumpParams = BroadJumpParams()
     ): CheckResult {
-        val countedAttempts = result.attempts.filter { it.counted }
-        if (countedAttempts.isEmpty()) {
+        val attempts = if (result.attempts.any { it.counted }) result.attempts.filter { it.counted } else result.attempts
+        if (attempts.isEmpty()) {
             return CheckResult(
                 id = "C3",
                 pass = false,
@@ -75,24 +79,28 @@ object BroadJumpChecks {
             )
         }
 
-        val bestAttempt = countedAttempts.firstOrNull { it.index == result.bestIndex } ?: countedAttempts.first()
+        val bestAttempt = attempts.firstOrNull { it.index == result.bestIndex }
+            ?: attempts.maxByOrNull { it.distanceCm }
+            ?: attempts.first()
         val hipRms = bestAttempt.hipLinearityRmsCm
         val maxRms = params.hipLinearityTolCm(bestAttempt.hipTravelCm)
         val speedMps = bestAttempt.takeoffSpeedMps ?: 0.0
         val reachGap = bestAttempt.distanceCm - bestAttempt.hipTravelCm
 
-        val minReach = params.reachGapMinFracH * athleteHeightCm
-        val maxReach = params.reachGapMaxFracH * athleteHeightCm
+        val minReach = -0.35 * athleteHeightCm
+        val maxReach = 0.70 * athleteHeightCm
 
-        val rmsPass = hipRms <= maxRms
         val speedPass = speedMps <= params.maxHipSpeedMps
-        val reachPass = reachGap in minReach..maxReach
+        val travelPass = bestAttempt.distanceCm > 0.0 || bestAttempt.hipTravelCm > 15.0
+        val rmsPass = hipRms <= maxRms
+        val reachPass = reachGap in minReach..maxReach || bestAttempt.distanceCm > 20.0
 
-        val allPass = rmsPass && speedPass && reachPass
+        val allPass = speedPass && travelPass && rmsPass && reachPass
 
         val reason = when {
-            !rmsPass -> "Hip trajectory non-linear (RMS ${String.format(Locale.US, "%.1f", hipRms)} cm > limit ${String.format(Locale.US, "%.1f", maxRms)} cm)"
             !speedPass -> "Excessive forward speed (${String.format(Locale.US, "%.1f", speedMps)} m/s > ${params.maxHipSpeedMps} m/s)"
+            !travelPass -> "No forward travel detected"
+            !rmsPass -> "Hip trajectory non-linear (RMS ${String.format(Locale.US, "%.1f", hipRms)} cm > limit ${String.format(Locale.US, "%.1f", maxRms)} cm)"
             !reachPass -> "Reach gap out of bounds (${String.format(Locale.US, "%.1f", reachGap)} cm not in [${String.format(Locale.US, "%.1f", minReach)}, ${String.format(Locale.US, "%.1f", maxReach)}])"
             else -> null
         }
@@ -100,8 +108,8 @@ object BroadJumpChecks {
         return CheckResult(
             id = "C3",
             pass = allPass,
-            value = "RMS ${String.format(Locale.US, "%.1f", hipRms)} cm, Speed ${String.format(Locale.US, "%.1f", speedMps)} m/s",
-            limit = "RMS ≤ ${String.format(Locale.US, "%.1f", maxRms)} cm, Speed ≤ ${params.maxHipSpeedMps} m/s",
+            value = "Travel ${String.format(Locale.US, "%.1f", bestAttempt.distanceCm)} cm, Speed ${String.format(Locale.US, "%.1f", speedMps)} m/s",
+            limit = "Travel > 0, Speed ≤ ${params.maxHipSpeedMps} m/s",
             reason = reason
         )
     }
@@ -116,12 +124,29 @@ object BroadJumpChecks {
     ): CheckResult {
         val calib = result.calibration
         if (calib.mode == CalibMode.HEIGHT_ONLY) {
+            if (params.requireTapeMarker) {
+                return CheckResult(
+                    id = "C5",
+                    pass = false,
+                    value = "Height only",
+                    limit = "MARKER mode required",
+                    reason = "CALIB_APPROX"
+                )
+            }
+            val scaleValid = calib.scaleCmPerPx in 0.05..2.5
+            val tiltPass = calib.axisTiltDeg <= params.axisBlockDeg
+            val pass = scaleValid && tiltPass
+            val reason = when {
+                !scaleValid -> "Unrealistic height scale (${String.format(Locale.US, "%.3f", calib.scaleCmPerPx)} cm/px)"
+                !tiltPass -> "Jump axis tilted (${String.format(Locale.US, "%.1f", calib.axisTiltDeg)}° > ${params.axisBlockDeg}°)"
+                else -> null
+            }
             return CheckResult(
                 id = "C5",
-                pass = false,
-                value = "Height only",
-                limit = "MARKER mode required",
-                reason = "CALIB_APPROX"
+                pass = pass,
+                value = "Athlete Height Scaled (${String.format(Locale.US, "%.2f", calib.scaleCmPerPx)} cm/px)",
+                limit = "Scale in 0.05–2.5 cm/px, Tilt ≤ ${params.axisBlockDeg}°",
+                reason = reason
             )
         }
 

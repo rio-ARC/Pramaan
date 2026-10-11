@@ -53,10 +53,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.pramaan.AppContainer
 import app.pramaan.core.model.PoseFrame
+import app.pramaan.core.model.PoseLandmarks
 import app.pramaan.core.model.TestType
 import app.pramaan.core.scoring.SitUpAnalyzer
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
 import app.pramaan.core.scoring.broadjump.BroadJumpLiveTracker
+import kotlin.math.abs
 import app.pramaan.data.AthleteEntity
 import app.pramaan.ui.components.CameraPermissionGate
 import app.pramaan.ui.components.PramaanButton
@@ -166,8 +168,54 @@ private fun RecordContent(
             if (frameBuffer.size > 180) frameBuffer.removeAt(0)
 
             frameCounter++
-            // Throttle scoring evaluation to every 3 frames for smooth UI rendering
-            if (frameCounter % 3 == 0) {
+            if (testType == TestType.BROAD_JUMP) {
+                val fw = container.poseEngine.frameWidth
+                val fh = container.poseEngine.frameHeight
+                val state = bjTracker.onFrame(frame, fw, fh)
+                if (state.standingStill && state.attemptsDetected == 0) {
+                    toastText = "Standing Steady • Ready to Jump"
+                    liveFeedback = "Ready behind line — jump forward"
+                } else if (state.attemptsDetected == 0 && !state.standingStill) {
+                    liveFeedback = "Hold still behind the line to begin"
+                }
+                if (state.attemptsDetected > 0) {
+                    attemptNumber = (state.attemptsDetected + 1).coerceAtMost(3)
+                }
+                if (state.lastApproxCm != null) {
+                    val approx = Math.round(state.lastApproxCm!! * 10.0) / 10.0
+                    provisionalMetric = approx
+                    if (provisionalMetric > bestBenchmark) {
+                        bestBenchmark = provisionalMetric
+                    }
+                    toastText = "Landing Detected • ≈ ${provisionalMetric.toInt()} cm"
+                    liveFeedback = "Jump ${state.attemptsDetected} recorded (≈ ${provisionalMetric.toInt()} cm) • Ready for next"
+                } else if (frameCounter % 5 == 0 && frameBuffer.size >= 15) {
+                    // Buffer trajectory fallback: detect displacement between stance and current position
+                    val hL = frameBuffer.first().landmarks[PoseLandmarks.LEFT_HIP]
+                    val hR = frameBuffer.first().landmarks[PoseLandmarks.RIGHT_HIP]
+                    val currHL = frame.landmarks[PoseLandmarks.LEFT_HIP]
+                    val currHR = frame.landmarks[PoseLandmarks.RIGHT_HIP]
+                    if ((hL.visibility >= 0.25f || hR.visibility >= 0.25f) && (currHL.visibility >= 0.25f || currHR.visibility >= 0.25f)) {
+                        val startHipX = (hL.x + hR.x) / 2.0 * fw
+                        val currHipX = (currHL.x + currHR.x) / 2.0 * fw
+                        val dx = abs(currHipX - startHipX)
+                        val athleteH = athleteProfile?.heightCm ?: 165.0
+                        // Estimate bodyPx from current frame
+                        val eye = frame.landmarks[PoseLandmarks.NOSE].y * fh
+                        val heel = maxOf(frame.landmarks[PoseLandmarks.LEFT_HEEL].y, frame.landmarks[PoseLandmarks.RIGHT_HEEL].y) * fh
+                        val bodyPx = if (heel > eye) (heel - eye) / 0.9 else (fh * 0.6)
+                        val approx = Math.round(dx * (athleteH / bodyPx) * 10.0) / 10.0
+                        if (approx >= 30.0) {
+                            provisionalMetric = approx
+                            if (provisionalMetric > bestBenchmark) {
+                                bestBenchmark = provisionalMetric
+                            }
+                            toastText = "Movement Detected • ≈ ${provisionalMetric.toInt()} cm"
+                            liveFeedback = "Jump recorded (≈ ${provisionalMetric.toInt()} cm)"
+                        }
+                    }
+                }
+            } else if (frameCounter % 3 == 0) {
                 val prof = athleteProfile
                 val heightCm = prof?.heightCm ?: 165.0
                 if (testType == TestType.VERTICAL_JUMP) {
@@ -187,25 +235,6 @@ private fun RecordContent(
                     bestBenchmark = provisionalMetric
                     toastText = "Rep ${result.totalReps} • Flexion Valid"
                     liveFeedback = "Rep valid: flexed > 70°"
-                } else if (testType == TestType.BROAD_JUMP) {
-                    val state = bjTracker.onFrame(frame)
-                    if (state.standingStill) {
-                        toastText = "Standing Steady • Ready to Jump"
-                        liveFeedback = "Ready — jump when you like"
-                    } else if (state.attemptsDetected == 0) {
-                        liveFeedback = "Hold still behind the line to begin"
-                    }
-                    if (state.attemptsDetected > 0) {
-                        attemptNumber = (state.attemptsDetected + 1).coerceAtMost(3)
-                    }
-                    if (state.lastApproxCm != null) {
-                        provisionalMetric = Math.round(state.lastApproxCm!! * 10.0) / 10.0
-                        if (provisionalMetric > bestBenchmark) {
-                            bestBenchmark = provisionalMetric
-                        }
-                        toastText = "Landing Detected • ≈ ${provisionalMetric.toInt()} cm"
-                        liveFeedback = "Attempt recorded • Walk back for next attempt"
-                    }
                 }
             }
         }

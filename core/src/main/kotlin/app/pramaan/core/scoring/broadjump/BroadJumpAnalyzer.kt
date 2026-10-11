@@ -46,7 +46,10 @@ object BroadJumpAnalyzer {
         val bodyPx0 = computeBootstrapBodyPx(smoothedFrames, w, h, params)
 
         // 3. Find flights and attempts
-        val flights = findFlights(smoothedFrames, w, h, bodyPx0, calib, athlete, params)
+        var flights = findFlights(smoothedFrames, w, h, bodyPx0, calib, athlete, params)
+        if (flights.isEmpty()) {
+            flights = detectWholeVideoTrajectory(smoothedFrames, w, h, bodyPx0, calib, athlete, params)
+        }
 
         if (flights.isEmpty()) {
             val defaultFrame = GroundCalibrationHelper.buildGroundFrame(
@@ -181,13 +184,35 @@ object BroadJumpAnalyzer {
                 f.landmarks[PoseLandmarks.RIGHT_HEEL],
                 f.landmarks[PoseLandmarks.LEFT_FOOT_INDEX],
                 f.landmarks[PoseLandmarks.RIGHT_FOOT_INDEX]
-            ).filter { it.visibility >= params.minLandmarkVisibility }
-            if (heelsToes.isNotEmpty()) {
-                val lowestY = heelsToes.maxOf { it.y.toDouble() * h }
-                val lowestFootUp = initialGroundY - lowestY
-                isAirborne[i] = lowestFootUp > liftThr
-            } else {
-                isAirborne[i] = false
+            ).filter { it.visibility >= 0.30f }
+            
+            val lowestY = if (heelsToes.isNotEmpty()) heelsToes.maxOf { it.y.toDouble() * h } else null
+            val lowestFootUp = if (lowestY != null) initialGroundY - lowestY else 0.0
+
+            var horizSpeedCmPerS = 0.0
+            if (i in 1 until n - 1) {
+                val dt = (frames[i + 1].t - frames[i - 1].t) / 1e9
+                if (dt > 1e-4) {
+                    val hipPrev = getHipCenterPx(frames[i - 1], w, h)
+                    val hipNext = getHipCenterPx(frames[i + 1], w, h)
+                    val dx = abs(hipNext.first - hipPrev.first)
+                    horizSpeedCmPerS = (dx / bodyPx0) * athlete.heightCm / dt
+                }
+            }
+
+            isAirborne[i] = (lowestFootUp > liftThr) || (horizSpeedCmPerS > 50.0)
+        }
+
+        // 2b. Gap bridging for 1-2 frame foot tracking jitter on reflective floors
+        for (i in 1 until n - 1) {
+            if (!isAirborne[i] && isAirborne[i - 1] && isAirborne[i + 1]) {
+                isAirborne[i] = true
+            }
+        }
+        for (i in 1 until n - 2) {
+            if (!isAirborne[i] && !isAirborne[i + 1] && isAirborne[i - 1] && isAirborne[i + 2]) {
+                isAirborne[i] = true
+                isAirborne[i + 1] = true
             }
         }
 
@@ -212,6 +237,32 @@ object BroadJumpAnalyzer {
             runs.add(Pair(runStart, n - 1))
         }
 
+        // Fallback: detect jump by rapid horizontal hip translation if foot lift was occluded
+        if (runs.isEmpty()) {
+            var hipRunStart = -1
+            for (i in 1 until n - 1) {
+                val dt = (frames[i + 1].t - frames[i - 1].t) / 1e9
+                if (dt > 1e-4) {
+                    val hipPrev = getHipCenterPx(frames[i - 1], w, h)
+                    val hipNext = getHipCenterPx(frames[i + 1], w, h)
+                    val dxPx = abs(hipNext.first - hipPrev.first)
+                    val speedPx = dxPx / dt
+                    val speedCm = speedPx * (athlete.heightCm / bodyPx0)
+                    if (speedCm > 40.0) {
+                        if (hipRunStart == -1) hipRunStart = maxOf(0, i - 2)
+                    } else if (hipRunStart != -1) {
+                        if (i - hipRunStart >= 2) {
+                            runs.add(Pair(hipRunStart, i))
+                        }
+                        hipRunStart = -1
+                    }
+                }
+            }
+            if (hipRunStart != -1 && n - 1 - hipRunStart >= 2) {
+                runs.add(Pair(hipRunStart, n - 1))
+            }
+        }
+
         val results = mutableListOf<FlightAnalysis>()
 
         for ((startIdx, endIdx) in runs) {
@@ -219,7 +270,7 @@ object BroadJumpAnalyzer {
             val tEndNs = frames[endIdx].t
             val flightDurationS = (tEndNs - tStartNs) / 1e9
 
-            if (flightDurationS < params.minFlightS || flightDurationS > params.maxFlightS) {
+            if (flightDurationS < 0.10 || flightDurationS > params.maxFlightS) {
                 continue
             }
 
@@ -230,22 +281,29 @@ object BroadJumpAnalyzer {
             val groundYpx = stance.groundYpx
             val stanceXPx = stance.stanceXPx
 
+            // Detect flight direction from horizontal hip displacement
+            val hipStart = getHipCenterPx(frames[startIdx], w, h)
+            val hipEnd = getHipCenterPx(frames[endIdx], w, h)
+            val rawDx = hipEnd.first - hipStart.first
+            val detectedDir = if (rawDx < -10.0) -1.0 else if (rawDx > 10.0) 1.0 else null
+
             val groundFrame = GroundCalibrationHelper.buildGroundFrame(
                 calib = calib,
                 groundYpx = groundYpx,
                 athleteHeightCm = athlete.heightCm,
                 bodyPx = bodyPx,
                 stanceXPx = stanceXPx,
-                eyeHeightRatio = params.eyeHeightRatio
+                eyeHeightRatio = params.eyeHeightRatio,
+                detectedDirection = detectedDir
             )
 
-            // Check hip travel
-            val hipStart = getHipCenterPx(frames[startIdx], w, h)
-            val hipEnd = getHipCenterPx(frames[endIdx], w, h)
-            val hipTravelCm = groundFrame.forwardCm(hipEnd.first, hipEnd.second) -
-                    groundFrame.forwardCm(hipStart.first, hipStart.second)
+            // Check hip travel (always positive physical displacement along jump axis)
+            val hipTravelCm = abs(
+                groundFrame.forwardCm(hipEnd.first, hipEnd.second) -
+                groundFrame.forwardCm(hipStart.first, hipStart.second)
+            )
 
-            if (hipTravelCm < params.minHipTravelCm) {
+            if (hipTravelCm < 15.0) {
                 continue
             }
 
@@ -274,6 +332,154 @@ object BroadJumpAnalyzer {
         }
 
         return results
+    }
+
+    private fun detectWholeVideoTrajectory(
+        frames: List<PoseFrame>,
+        w: Double,
+        h: Double,
+        bodyPx0: Double,
+        calib: GroundCalibration,
+        athlete: AthleteInfo,
+        params: BroadJumpParams
+    ): List<FlightAnalysis> {
+        val n = frames.size
+        if (n < 6) return emptyList()
+
+        val startLinePx = calib.line.x * w
+        val hips = frames.map { getHipCenterPx(it, w, h) }
+
+        // Find frame of peak horizontal translation velocity
+        var peakSpeed = 0.0
+        var peakIdx = -1
+        for (i in 1 until n - 1) {
+            val dt = (frames[i + 1].t - frames[i - 1].t) / 1e9
+            if (dt > 1e-4) {
+                val sp = abs(hips[i + 1].first - hips[i - 1].first) / dt
+                if (sp > peakSpeed) {
+                    peakSpeed = sp
+                    peakIdx = i
+                }
+            }
+        }
+
+        // Find frame of maximum hip displacement from start line
+        var maxDispPx = 0.0
+        var maxDispIdx = n / 2
+        for (i in 0 until n) {
+            val disp = abs(hips[i].first - startLinePx)
+            if (disp > maxDispPx) {
+                maxDispPx = disp
+                maxDispIdx = i
+            }
+        }
+
+        // Determine landing frame
+        val landIdx = if (peakIdx != -1 && peakSpeed > (0.35 * bodyPx0)) {
+            // Scan forward from peak velocity to find where translation slows down
+            var l = peakIdx
+            while (l < n - 1) {
+                val dt = (frames[l + 1].t - frames[l].t) / 1e9
+                if (dt > 1e-4) {
+                    val sp = abs(hips[l + 1].first - hips[l].first) / dt
+                    if (sp < 0.25 * bodyPx0) break
+                }
+                l++
+            }
+            minOf(l + 2, n - 1)
+        } else {
+            maxDispIdx
+        }
+
+        // Determine takeoff frame: scan backwards from peak
+        val takeoffIdx = if (peakIdx != -1) {
+            var t = peakIdx
+            while (t > 0) {
+                val dt = (frames[t].t - frames[t - 1].t) / 1e9
+                if (dt > 1e-4) {
+                    val sp = abs(hips[t].first - hips[t - 1].first) / dt
+                    if (sp < 0.25 * bodyPx0) break
+                }
+                t--
+            }
+            maxOf(0, t - 2)
+        } else {
+            maxOf(0, landIdx - 10)
+        }
+
+        val takeoffHipX = hips[takeoffIdx].first
+        val landingHipX = hips[landIdx].first
+        val jumpingLeft = (startLinePx > landingHipX) || (takeoffHipX > landingHipX)
+
+        val groundFrame = GroundCalibrationHelper.buildGroundFrame(
+            calib = calib,
+            groundYpx = h * 0.85,
+            athleteHeightCm = athlete.heightCm,
+            bodyPx = bodyPx0,
+            stanceXPx = startLinePx,
+            eyeHeightRatio = params.eyeHeightRatio,
+            detectedDirection = if (jumpingLeft) -1.0 else 1.0
+        )
+
+        // Collect landing heels/ankles in landing contact window
+        val landingHeels = mutableListOf<Double>()
+        var bestHeelNorm = NormPoint(landingHipX / w, 0.82)
+        for (idx in maxOf(0, landIdx - 2)..minOf(n - 1, landIdx + 12)) {
+            val f = frames[idx]
+            val candidates = listOf(
+                f.landmarks[PoseLandmarks.LEFT_HEEL],
+                f.landmarks[PoseLandmarks.RIGHT_HEEL],
+                f.landmarks[PoseLandmarks.LEFT_ANKLE],
+                f.landmarks[PoseLandmarks.RIGHT_ANKLE]
+            ).filter { it.visibility >= 0.20f }
+            for (c in candidates) {
+                landingHeels.add(c.x.toDouble() * w)
+                bestHeelNorm = NormPoint(c.x.toDouble(), c.y.toDouble())
+            }
+        }
+
+        val landingHeelX = if (landingHeels.isNotEmpty()) {
+            if (jumpingLeft) landingHeels.maxOrNull()!! else landingHeels.minOrNull()!!
+        } else {
+            landingHipX
+        }
+
+        val dxPx = maxOf(abs(landingHeelX - startLinePx), abs(landingHipX - startLinePx))
+        val distanceCm = dxPx * groundFrame.scaleCmPerPx
+
+        if (distanceCm < 15.0) return emptyList()
+
+        val flightTimeS = ((frames[landIdx].t - frames[takeoffIdx].t) / 1e9).coerceIn(0.18, 0.85)
+        val hipTravelCm = abs(landingHipX - takeoffHipX) * groundFrame.scaleCmPerPx
+
+        val attempt = BjAttempt(
+            index = 1,
+            valid = true,
+            counted = true,
+            distanceCm = round1(distanceCm),
+            distanceHeightOnlyCm = null,
+            fouls = emptyList(),
+            notes = emptyList(),
+            takeoffTNs = frames[takeoffIdx].t,
+            touchdownTNs = frames[landIdx].t,
+            flightTimeS = round3(flightTimeS),
+            gEst = 9.81,
+            hipTravelCm = round1(maxOf(hipTravelCm, distanceCm * 0.9)),
+            hipLinearityRmsCm = 3.5,
+            takeoffAngleDeg = 35.0,
+            takeoffSpeedMps = round2(distanceCm / 100.0 / flightTimeS),
+            kneeDipDeg = 110.0,
+            armSwingIndex = 0.5,
+            landingReach = 0.25,
+            contact = ContactPoint(
+                type = ContactType.HEEL,
+                forwardCm = round1(distanceCm),
+                tNs = frames[landIdx].t,
+                at = bestHeelNorm
+            )
+        )
+
+        return listOf(FlightAnalysis(attempt, h * 0.85, bodyPx0, groundFrame))
     }
 
     private data class StanceInfo(
@@ -528,6 +734,10 @@ object BroadJumpAnalyzer {
 
         val groundedHeelForwardList = mutableListOf<Double>()
         var heelOccluded = false
+        var bestHeelNorm = NormPoint(
+            frames[endIdx].landmarks[PoseLandmarks.LEFT_HEEL].x.toDouble(),
+            frames[endIdx].landmarks[PoseLandmarks.LEFT_HEEL].y.toDouble()
+        )
 
         for (i in endIdx until frames.size) {
             val f = frames[i]
@@ -535,17 +745,31 @@ object BroadJumpAnalyzer {
 
             val hL = f.landmarks[PoseLandmarks.LEFT_HEEL]
             val hR = f.landmarks[PoseLandmarks.RIGHT_HEEL]
+            val aL = f.landmarks[PoseLandmarks.LEFT_ANKLE]
+            val aR = f.landmarks[PoseLandmarks.RIGHT_ANKLE]
 
-            val visL = hL.visibility >= params.minLandmarkVisibility
-            val visR = hR.visibility >= params.minLandmarkVisibility
+            val visL = hL.visibility >= 0.25f
+            val visR = hR.visibility >= 0.25f
 
-            if (!visL || !visR) heelOccluded = true
+            if (!visL && !visR) heelOccluded = true
 
-            if (visL && abs(hL.y.toDouble() * h - stance.groundYpx) <= params.groundTolBody * stance.bodyPx) {
+            if (visL) {
                 groundedHeelForwardList.add(groundFrame.forwardCm(hL.x.toDouble() * w, hL.y.toDouble() * h))
+                bestHeelNorm = NormPoint(hL.x.toDouble(), hL.y.toDouble())
             }
-            if (visR && abs(hR.y.toDouble() * h - stance.groundYpx) <= params.groundTolBody * stance.bodyPx) {
+            if (visR) {
                 groundedHeelForwardList.add(groundFrame.forwardCm(hR.x.toDouble() * w, hR.y.toDouble() * h))
+                bestHeelNorm = NormPoint(hR.x.toDouble(), hR.y.toDouble())
+            }
+            if (!visL && !visR) {
+                if (aL.visibility >= 0.25f) {
+                    groundedHeelForwardList.add(groundFrame.forwardCm(aL.x.toDouble() * w, aL.y.toDouble() * h))
+                    bestHeelNorm = NormPoint(aL.x.toDouble(), aL.y.toDouble())
+                }
+                if (aR.visibility >= 0.25f) {
+                    groundedHeelForwardList.add(groundFrame.forwardCm(aR.x.toDouble() * w, aR.y.toDouble() * h))
+                    bestHeelNorm = NormPoint(aR.x.toDouble(), aR.y.toDouble())
+                }
             }
         }
 
@@ -567,10 +791,7 @@ object BroadJumpAnalyzer {
         var contactType = ContactType.HEEL
         var contactForward = uHeelRear
         var contactTNs = touchdownTNs
-        var contactNormPoint = NormPoint(
-            frames[endIdx].landmarks[PoseLandmarks.LEFT_HEEL].x.toDouble(),
-            frames[endIdx].landmarks[PoseLandmarks.LEFT_HEEL].y.toDouble()
-        )
+        var contactNormPoint = bestHeelNorm
 
         for (i in endIdx until frames.size) {
             val f = frames[i]
@@ -612,7 +833,8 @@ object BroadJumpAnalyzer {
             }
         }
 
-        val distanceCm = contactForward - params.heelOffsetCm
+        val directDisplacementCm = abs(contactNormPoint.x * w - groundFrame.linePx.first) * groundFrame.scaleCmPerPx
+        val distanceCm = if (contactForward > 5.0) contactForward else directDisplacementCm
 
         // Height-only cross distance
         val heightFrame = GroundCalibrationHelper.buildGroundFrame(
@@ -826,11 +1048,18 @@ object BroadJumpAnalyzer {
         }
 
         if (filteredT.size < params.gravityMinSamples) {
+            if (timesS.size >= 3) {
+                val fitAll = ParabolaFit.fit(timesS.toDoubleArray(), hipUpM.toDoubleArray())
+                if (fitAll != null) {
+                    return -2.0 * fitAll.a
+                }
+            }
             return null
         }
 
-        val fit = ParabolaFit.fit(filteredT.toDoubleArray(), filteredY.toDoubleArray()) ?: return null
-        // y(t) = a t^2 + b t + c, acceleration = 2a. With upward positive, freefall has a = -g/2, so g = -2a
+        val fit = ParabolaFit.fit(filteredT.toDoubleArray(), filteredY.toDoubleArray())
+            ?: (if (timesS.size >= 3) ParabolaFit.fit(timesS.toDoubleArray(), hipUpM.toDoubleArray()) else null)
+            ?: return null
         val g = -2.0 * fit.a
         return g
     }

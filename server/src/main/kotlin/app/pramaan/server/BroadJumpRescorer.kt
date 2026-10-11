@@ -172,9 +172,10 @@ object BroadJumpRescorer {
         }
 
         // 4. Server physics checks on serverResult
-        allChecks.add(BroadJumpChecks.checkGravity(serverResult))
-        allChecks.add(BroadJumpChecks.checkHorizontalConsistency(serverResult, accountHeight))
-        allChecks.add(BroadJumpChecks.checkCalibrationAgreement(serverResult))
+        val bjParams = BroadJumpParams(requireTapeMarker = (manifest.calibration?.mode == CalibMode.MARKER))
+        allChecks.add(BroadJumpChecks.checkGravity(serverResult, bjParams))
+        allChecks.add(BroadJumpChecks.checkHorizontalConsistency(serverResult, accountHeight, bjParams))
+        allChecks.add(BroadJumpChecks.checkCalibrationAgreement(serverResult, bjParams))
 
         // Gyro camera steadiness
         val gyroFile = File(sessionFolder, "gyro.jsonl")

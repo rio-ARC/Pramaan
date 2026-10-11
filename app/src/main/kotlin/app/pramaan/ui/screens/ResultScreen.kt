@@ -67,6 +67,7 @@ import app.pramaan.core.manifest.CanonicalJson
 import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.model.Badge
 import app.pramaan.core.model.TestType
+import app.pramaan.core.scoring.broadjump.CalibMode
 import app.pramaan.data.AthleteEntity
 import app.pramaan.data.SessionEntity
 import java.io.File
@@ -541,10 +542,14 @@ fun ResultScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (manifest?.test == TestType.BROAD_JUMP)
-                                    "Measured against ${manifest?.calibration?.markerCm?.toInt() ?: 200} cm mark"
-                                else
-                                    "Recorded: Today",
+                                text = if (manifest?.test == TestType.BROAD_JUMP) {
+                                    if (manifest?.calibration?.mode == CalibMode.HEIGHT_ONLY)
+                                        "Athlete Height Scaled (${athlete?.heightCm?.toInt() ?: 165} cm)"
+                                    else
+                                        "Measured against ${manifest?.calibration?.markerCm?.toInt() ?: 200} cm mark"
+                                } else {
+                                    "Recorded: Today"
+                                },
                                 style = PramaanTypography.bodySmall,
                                 color = PramaanOutline
                             )
@@ -633,7 +638,9 @@ fun ResultScreen(
                             )
                             AuditCheckRow(
                                 title = "Ground Calibration Agreement (C5)",
-                                subtitle = "Tape marker scale agrees with registered athlete height scale (diff ≤ 10%)",
+                                subtitle = if (manifest?.calibration?.mode == CalibMode.HEIGHT_ONLY)
+                                    "Optical scale calibrated against athlete body height (no tape required)"
+                                else "Tape marker scale agrees with registered athlete height scale (diff ≤ 10%)",
                                 passed = manifest?.checks?.find { it.id == "C5" }?.pass ?: true
                             )
                         } else {

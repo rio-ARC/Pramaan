@@ -19,6 +19,13 @@ data class NormPoint(
 )
 
 @Serializable
+enum class JumpDirection {
+    AUTO,
+    LEFT,
+    RIGHT
+}
+
+@Serializable
 data class GroundCalibration(
     val mode: CalibMode,
     val frameW: Int,
@@ -26,7 +33,8 @@ data class GroundCalibration(
     val calibFrameTNs: Long,
     val line: NormPoint,
     val marker: NormPoint? = null,
-    val markerCm: Double? = null
+    val markerCm: Double? = null,
+    val jumpDirection: JumpDirection = JumpDirection.AUTO
 )
 
 @Serializable
@@ -69,7 +77,8 @@ object GroundCalibrationHelper {
         athleteHeightCm: Double,
         bodyPx: Double,
         stanceXPx: Double? = null,
-        eyeHeightRatio: Double = 0.936
+        eyeHeightRatio: Double = 0.936,
+        detectedDirection: Double? = null
     ): GroundFrame {
         val sHeight = heightScale(athleteHeightCm, bodyPx, eyeHeightRatio)
         val lPx = Pair(calib.line.x * calib.frameW, calib.line.y * calib.frameH)
@@ -101,7 +110,14 @@ object GroundCalibrationHelper {
                 )
             }
             CalibMode.HEIGHT_ONLY -> {
-                val forwardDir = if (stanceXPx != null && stanceXPx > lPx.first) -1.0 else 1.0
+                val forwardDir = when {
+                    calib.jumpDirection == JumpDirection.LEFT -> -1.0
+                    calib.jumpDirection == JumpDirection.RIGHT -> 1.0
+                    detectedDirection != null -> detectedDirection
+                    stanceXPx != null && stanceXPx > lPx.first -> -1.0
+                    calib.line.x > 0.55 -> -1.0
+                    else -> 1.0
+                }
                 val axisE = Pair(forwardDir, 0.0)
 
                 GroundFrame(
