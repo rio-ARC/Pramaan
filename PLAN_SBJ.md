@@ -169,6 +169,14 @@
 - [x] Add server test **T-BJ-S6** in `Phase5BroadJumpServerTest.kt` verifying hand-calculated stats on a 5-row fixture.
 - **Master Acceptance Condition:** Validation data ingestion, statistical calculations, SVG plots, and CSV import/export function accurately and tests pass green.
 
-### Phase 5 & 6: Polish & Rehearsal
-- **Scope:** Error handling, edge cases (no jump detected, extreme tilt warning), localized UI review, and final live demo rehearsals.
+### Phase 5 & 6: Polish & Rehearsal (Complete)
+- [x] Verified error handling and edge cases:
+  - Axis tilt $> 20^\circ$ blocks calibration confirmation with clear visual feedback (`✕ (>20°)`).
+  - Reversed line and marker taps flagged as Behind (`Behind ✕`).
+  - No jump detected handled gracefully in `ResultScreen` sequence strip.
+  - Height-only fallback clearly communicated with approximate / non-certifiable badge.
+- [x] Full bilingual string coverage verified in `res/values/strings.xml` and `res/values-hi/strings.xml` (Title, Fouls, Calibration instructions, Biomechanical feedback chips).
+- [x] Full build and end-to-end regression validation: 54/54 `:core` unit tests pass, all `:server` integration tests pass (T-BJ-S1 through T-BJ-S6 + rescore mismatch), and `:app` compiles with zero errors.
+- **Master Acceptance Condition:** All 12 steps of the live walkthrough flow pass end-to-end.
+
 
