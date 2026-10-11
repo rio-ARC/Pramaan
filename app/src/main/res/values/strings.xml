@@ -1,3 +1,16 @@
 <resources>
     <string name="app_name">Pramaan</string>
+    <string name="bj_title">Standing Broad Jump</string>
+    <string name="bj_foul_toes_over_line">Toes crossed the line</string>
+    <string name="bj_foul_step_or_hop">Step or hop before the jump</string>
+    <string name="bj_foul_one_foot">Take off with both feet together</string>
+    <string name="bj_note_fall_back">Hand or hips touched behind your heels; distance measured to that point</string>
+    <string name="bj_calib_tap_line">Tap the front edge of the line (0 cm)</string>
+    <string name="bj_calib_tap_mark">Tap the %d cm mark on the tape</string>
+    <string name="fb_bj_deeper_dip">Bend your knees a little deeper before jumping</string>
+    <string name="fb_bj_swing_arms">Swing your arms back, then drive them forward and up</string>
+    <string name="fb_bj_launch_higher">Launch a bit higher, not only forward</string>
+    <string name="fb_bj_launch_flatter">Launch a bit flatter and drive forward</string>
+    <string name="fb_bj_reach_forward">Reach your feet forward as you land</string>
+    <string name="fb_bj_good">Good jump. Keep the same technique</string>
 </resources>

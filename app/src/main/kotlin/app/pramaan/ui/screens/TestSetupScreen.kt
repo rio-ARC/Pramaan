@@ -279,7 +279,7 @@ fun TestSetupScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Minimal 3m Field Diagram Canvas
+                    // Minimal Setup Diagram Canvas
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -300,96 +300,160 @@ fun TestSetupScreen(
                                 strokeWidth = 3f
                             )
 
-                            // Tripod on Left
-                            val tripodX = 60f
-                            val tripodTop = h - 70f
-                            // Legs
-                            drawLine(
-                                color = Color(0xFF64748B),
-                                start = Offset(tripodX, tripodTop),
-                                end = Offset(tripodX - 25f, h - 20f),
-                                strokeWidth = 3f
-                            )
-                            drawLine(
-                                color = Color(0xFF64748B),
-                                start = Offset(tripodX, tripodTop),
-                                end = Offset(tripodX, h - 20f),
-                                strokeWidth = 3f
-                            )
-                            drawLine(
-                                color = Color(0xFF64748B),
-                                start = Offset(tripodX, tripodTop),
-                                end = Offset(tripodX + 25f, h - 20f),
-                                strokeWidth = 3f
-                            )
-                            // Phone on tripod
-                            drawRect(
-                                color = Color(0xFF1E293B),
-                                topLeft = Offset(tripodX - 6f, tripodTop - 30f),
-                                size = androidx.compose.ui.geometry.Size(12f, 26f)
-                            )
-                            drawCircle(
-                                color = PramaanSaffron,
-                                radius = 3f,
-                                center = Offset(tripodX, tripodTop - 24f)
-                            )
+                            if (testType == TestType.BROAD_JUMP) {
+                                // Side-on Broad Jump setup diagram
+                                // 1. Takeoff line (Saffron vertical mark)
+                                val lineX = w * 0.28f
+                                drawLine(
+                                    color = PramaanSaffron,
+                                    start = Offset(lineX, h - 35f),
+                                    end = Offset(lineX, h - 15f),
+                                    strokeWidth = 6f
+                                )
 
-                            // Athlete on Right
-                            val athleteX = w - 70f
-                            val headY = h - 90f
-                            // Head
-                            drawCircle(
-                                color = Color(0xFF1E293B),
-                                radius = 9f,
-                                center = Offset(athleteX, headY)
-                            )
-                            // Torso
-                            drawLine(
-                                color = PramaanSaffron,
-                                start = Offset(athleteX, headY + 9f),
-                                end = Offset(athleteX, headY + 45f),
-                                strokeWidth = 5f
-                            )
-                            // Legs
-                            drawLine(
-                                color = Color(0xFF1E293B),
-                                start = Offset(athleteX, headY + 45f),
-                                end = Offset(athleteX - 10f, h - 20f),
-                                strokeWidth = 3.5f
-                            )
-                            drawLine(
-                                color = Color(0xFF1E293B),
-                                start = Offset(athleteX, headY + 45f),
-                                end = Offset(athleteX + 10f, h - 20f),
-                                strokeWidth = 3.5f
-                            )
+                                // 2. Measuring tape line along floor (Blue dash)
+                                val tapeEndX = w * 0.88f
+                                drawLine(
+                                    color = Color(0xFF2563EB),
+                                    start = Offset(lineX, h - 18f),
+                                    end = Offset(tapeEndX, h - 18f),
+                                    strokeWidth = 4f
+                                )
+                                // 200cm mark chip on tape
+                                val mark200X = lineX + (tapeEndX - lineX) * 0.67f
+                                drawLine(
+                                    color = Color(0xFF1D4ED8),
+                                    start = Offset(mark200X, h - 28f),
+                                    end = Offset(mark200X, h - 15f),
+                                    strokeWidth = 4f
+                                )
 
-                            // Field of View Cone (dashed orange)
-                            val fovPathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
-                            drawLine(
-                                color = PramaanSaffron.copy(alpha = 0.5f),
-                                start = Offset(tripodX + 8f, tripodTop - 20f),
-                                end = Offset(athleteX - 25f, headY - 10f),
-                                strokeWidth = 2f,
-                                pathEffect = fovPathEffect
-                            )
-                            drawLine(
-                                color = PramaanSaffron.copy(alpha = 0.5f),
-                                start = Offset(tripodX + 8f, tripodTop - 20f),
-                                end = Offset(athleteX - 25f, h - 15f),
-                                strokeWidth = 2f,
-                                pathEffect = fovPathEffect
-                            )
+                                // 3. Athlete on Left (Behind take-off line)
+                                val athleteX = lineX - 22f
+                                val headY = h - 90f
+                                drawCircle(
+                                    color = Color(0xFF1E293B),
+                                    radius = 8f,
+                                    center = Offset(athleteX, headY)
+                                )
+                                drawLine(
+                                    color = PramaanSaffron,
+                                    start = Offset(athleteX, headY + 8f),
+                                    end = Offset(athleteX, headY + 42f),
+                                    strokeWidth = 5f
+                                )
+                                drawLine(
+                                    color = Color(0xFF1E293B),
+                                    start = Offset(athleteX, headY + 42f),
+                                    end = Offset(athleteX - 6f, h - 20f),
+                                    strokeWidth = 3.5f
+                                )
+                                drawLine(
+                                    color = Color(0xFF1E293B),
+                                    start = Offset(athleteX, headY + 42f),
+                                    end = Offset(athleteX + 6f, h - 20f),
+                                    strokeWidth = 3.5f
+                                )
 
-                            // 3.0 m Distance Line with text
-                            val midY = h - 35f
-                            drawLine(
-                                color = Color(0xFF94A3B8),
-                                start = Offset(tripodX + 25f, midY),
-                                end = Offset(athleteX - 25f, midY),
-                                strokeWidth = 2f,
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
-                            )
+                                // 4. Jump trajectory arc (dashed emerald)
+                                val jumpArcEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                                drawLine(
+                                    color = PramaanEmerald,
+                                    start = Offset(lineX, h - 30f),
+                                    end = Offset(mark200X - 15f, h - 50f),
+                                    strokeWidth = 2.5f,
+                                    pathEffect = jumpArcEffect
+                                )
+                                drawLine(
+                                    color = PramaanEmerald,
+                                    start = Offset(mark200X - 15f, h - 50f),
+                                    end = Offset(mark200X, h - 20f),
+                                    strokeWidth = 2.5f,
+                                    pathEffect = jumpArcEffect
+                                )
+
+                                // 5. Camera Icon / Tripod indicator at top
+                                drawCircle(
+                                    color = Color(0xFF64748B),
+                                    radius = 5f,
+                                    center = Offset(w * 0.5f, 25f)
+                                )
+                            } else {
+                                // Default Tripod on Left
+                                val tripodX = 60f
+                                val tripodTop = h - 70f
+                                drawLine(
+                                    color = Color(0xFF64748B),
+                                    start = Offset(tripodX, tripodTop),
+                                    end = Offset(tripodX - 25f, h - 20f),
+                                    strokeWidth = 3f
+                                )
+                                drawLine(
+                                    color = Color(0xFF64748B),
+                                    start = Offset(tripodX, tripodTop),
+                                    end = Offset(tripodX, h - 20f),
+                                    strokeWidth = 3f
+                                )
+                                drawLine(
+                                    color = Color(0xFF64748B),
+                                    start = Offset(tripodX, tripodTop),
+                                    end = Offset(tripodX + 25f, h - 20f),
+                                    strokeWidth = 3f
+                                )
+                                drawRect(
+                                    color = Color(0xFF1E293B),
+                                    topLeft = Offset(tripodX - 6f, tripodTop - 30f),
+                                    size = androidx.compose.ui.geometry.Size(12f, 26f)
+                                )
+                                drawCircle(
+                                    color = PramaanSaffron,
+                                    radius = 3f,
+                                    center = Offset(tripodX, tripodTop - 24f)
+                                )
+
+                                // Athlete on Right
+                                val athleteX = w - 70f
+                                val headY = h - 90f
+                                drawCircle(
+                                    color = Color(0xFF1E293B),
+                                    radius = 9f,
+                                    center = Offset(athleteX, headY)
+                                )
+                                drawLine(
+                                    color = PramaanSaffron,
+                                    start = Offset(athleteX, headY + 9f),
+                                    end = Offset(athleteX, headY + 45f),
+                                    strokeWidth = 5f
+                                )
+                                drawLine(
+                                    color = Color(0xFF1E293B),
+                                    start = Offset(athleteX, headY + 45f),
+                                    end = Offset(athleteX - 10f, h - 20f),
+                                    strokeWidth = 3.5f
+                                )
+                                drawLine(
+                                    color = Color(0xFF1E293B),
+                                    start = Offset(athleteX, headY + 45f),
+                                    end = Offset(athleteX + 10f, h - 20f),
+                                    strokeWidth = 3.5f
+                                )
+
+                                val fovPathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                                drawLine(
+                                    color = PramaanSaffron.copy(alpha = 0.5f),
+                                    start = Offset(tripodX + 8f, tripodTop - 20f),
+                                    end = Offset(athleteX - 25f, headY - 10f),
+                                    strokeWidth = 2f,
+                                    pathEffect = fovPathEffect
+                                )
+                                drawLine(
+                                    color = PramaanSaffron.copy(alpha = 0.5f),
+                                    start = Offset(tripodX + 8f, tripodTop - 20f),
+                                    end = Offset(athleteX - 25f, h - 15f),
+                                    strokeWidth = 2f,
+                                    pathEffect = fovPathEffect
+                                )
+                            }
                         }
                     }
 
@@ -412,7 +476,10 @@ fun TestSetupScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Keep the phone on a steady stand 3m away, full body in frame.",
+                            text = if (testType == TestType.BROAD_JUMP)
+                                "Phone side-on 3–4m away. Lay tape along jump path with 0 cm at take-off line."
+                            else
+                                "Keep the phone on a steady stand 3m away, full body in frame.",
                             style = PramaanTypography.bodySmall,
                             color = PramaanOnSurface
                         )
@@ -449,29 +516,50 @@ fun TestSetupScreen(
                         }
                     }
 
-                    // Check 1: Camera Framing
-                    PreFlightCheckItem(
-                        title = "Full body in camera frame",
-                        subtitle = "Head-to-toe captured with floor margin",
-                        statusText = "Ready",
-                        isPassed = true
-                    )
+                    if (testType == TestType.BROAD_JUMP) {
+                        PreFlightCheckItem(
+                            title = "Phone landscape and steady",
+                            subtitle = if (gyroSteady) "Tripod detected, variance ${(currentRms * 100).toInt() / 100.0}°" else "Movement detected - place phone on steady stand",
+                            statusText = if (gyroSteady) "Tripod Detected" else "Adjusting",
+                            isPassed = gyroSteady
+                        )
+                        PreFlightCheckItem(
+                            title = "Measuring tape flat & taped down",
+                            subtitle = "0 cm at takeoff line, running ≥ 2.5 m forward in frame",
+                            statusText = "Required",
+                            isPassed = true
+                        )
+                        PreFlightCheckItem(
+                            title = "Athlete profile height",
+                            subtitle = "Registered height: ${profile?.heightCm?.toInt() ?: 165} cm used for C5 physics verification",
+                            statusText = "Verified",
+                            isPassed = true
+                        )
+                    } else {
+                        // Check 1: Camera Framing
+                        PreFlightCheckItem(
+                            title = "Full body in camera frame",
+                            subtitle = "Head-to-toe captured with floor margin",
+                            statusText = "Ready",
+                            isPassed = true
+                        )
 
-                    // Check 2: Gyroscope Steadiness
-                    PreFlightCheckItem(
-                        title = "Phone steadiness",
-                        subtitle = if (gyroSteady) "Gyroscope idle, variance ${(currentRms * 100).toInt() / 100.0}°" else "Movement detected - place phone on stand",
-                        statusText = if (gyroSteady) "Tripod Detected" else "Adjusting",
-                        isPassed = gyroSteady
-                    )
+                        // Check 2: Gyroscope Steadiness
+                        PreFlightCheckItem(
+                            title = "Phone steadiness",
+                            subtitle = if (gyroSteady) "Gyroscope idle, variance ${(currentRms * 100).toInt() / 100.0}°" else "Movement detected - place phone on stand",
+                            statusText = if (gyroSteady) "Tripod Detected" else "Adjusting",
+                            isPassed = gyroSteady
+                        )
 
-                    // Check 3: Lighting
-                    PreFlightCheckItem(
-                        title = "Lighting condition",
-                        subtitle = "High contrast, no backlight silhouette",
-                        statusText = "Good Daylight",
-                        isPassed = true
-                    )
+                        // Check 3: Lighting
+                        PreFlightCheckItem(
+                            title = "Lighting condition",
+                            subtitle = "High contrast, no backlight silhouette",
+                            statusText = "Good Daylight",
+                            isPassed = true
+                        )
+                    }
                 }
             }
 

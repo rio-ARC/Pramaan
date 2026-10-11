@@ -1,5 +1,7 @@
 package app.pramaan.ui.screens
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,6 +48,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,14 +57,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.pramaan.AppContainer
 import app.pramaan.core.integrity.VerificationOutcome
 import app.pramaan.core.manifest.CanonicalJson
 import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.model.Badge
+import app.pramaan.core.model.TestType
 import app.pramaan.data.AthleteEntity
 import app.pramaan.data.SessionEntity
+import java.io.File
 import app.pramaan.ui.components.BadgeChip
 import app.pramaan.ui.components.InitialsAvatar
 import app.pramaan.ui.components.PramaanButton
@@ -92,6 +101,7 @@ fun ResultScreen(
     var manifest by remember { mutableStateOf<SessionManifest?>(null) }
     var athlete by remember { mutableStateOf<AthleteEntity?>(null) }
     var currentBadge by remember { mutableStateOf(Badge.VERIFIED) }
+    var selectedAttemptIndex by remember { mutableIntStateOf(0) }
 
     // Tamper simulation dialog state
     var showTamperModal by remember { mutableStateOf(false) }
@@ -298,8 +308,19 @@ fun ResultScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Trial Run Sequence Strip (3 Attempts)
+                    val bjAttempts = manifest?.result?.broadJumpAttempts ?: emptyList()
                     val attempts = manifest?.result?.attempts ?: emptyList()
+
+                    if (bjAttempts.isNotEmpty()) {
+                        Text(
+                            text = "Valid attempts: ${bjAttempts.count { it.valid }} of ${bjAttempts.size}",
+                            style = PramaanTypography.bodySmall,
+                            color = PramaanEmerald
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Trial Run Sequence Strip
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -317,7 +338,57 @@ fun ResultScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            if (attempts.isNotEmpty()) {
+                            if (bjAttempts.isNotEmpty()) {
+                                bjAttempts.forEachIndexed { idx, att ->
+                                    val isSelected = (selectedAttemptIndex == idx)
+                                    val isBest = att.valid && att.distanceCm == (manifest?.result?.best ?: 0.0)
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) Color(0xFFEFF6FF) else Color.White)
+                                            .border(
+                                                width = if (isSelected) 2.dp else 1.dp,
+                                                color = if (isSelected) Color(0xFF2563EB) else Color(0xFFE2E8F0),
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable { selectedAttemptIndex = idx }
+                                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "Jump ${idx + 1}",
+                                                    style = PramaanTypography.labelSmall,
+                                                    color = if (isSelected) Color(0xFF2563EB) else PramaanOutline
+                                                )
+                                                if (isBest) {
+                                                    Spacer(modifier = Modifier.width(2.dp))
+                                                    Icon(
+                                                        imageVector = Icons.Default.Star,
+                                                        contentDescription = null,
+                                                        tint = PramaanSaffron,
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "${att.distanceCm.toInt()} cm",
+                                                style = PramaanTypography.labelLarge,
+                                                color = PramaanOnSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = if (att.valid) "VALID" else if (att.fouls.isNotEmpty()) att.fouls.first().name.take(8) else "NOTE",
+                                                fontSize = 9.sp,
+                                                color = if (att.valid) PramaanEmerald else PramaanError
+                                            )
+                                        }
+                                    }
+                                }
+                            } else if (attempts.isNotEmpty()) {
                                 attempts.forEachIndexed { idx, att ->
                                     val isBest = att.flightCm == (manifest?.result?.best ?: 0.0)
                                     Box(
@@ -360,7 +431,6 @@ fun ResultScreen(
                                     }
                                 }
                             } else {
-                                // Default representation
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
@@ -376,6 +446,83 @@ fun ResultScreen(
                                 }
                             }
                         }
+                    }
+
+                    // Standing Broad Jump: Landing Still & Biomechanics
+                    if (bjAttempts.isNotEmpty()) {
+                        val curAtt = bjAttempts.getOrNull(selectedAttemptIndex) ?: bjAttempts.first()
+                        val stillFile = File(container.sessionStore.getStillsDir(sessionId), "att${curAtt.index}_landing.jpg")
+                        val stillBmp = remember(stillFile.absolutePath, curAtt.index) {
+                            if (stillFile.exists()) BitmapFactory.decodeFile(stillFile.absolutePath) else null
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (stillBmp != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black)
+                            ) {
+                                Image(
+                                    bitmap = stillBmp.asImageBitmap(),
+                                    contentDescription = "Landing Still",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(8.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xCC000000))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "Landing Contact: ${curAtt.distanceCm.toInt()} cm (Jump ${curAtt.index})",
+                                        color = Color.White,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+
+                        // Biomechanics Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Angle: ${curAtt.takeoffAngleDeg?.toInt() ?: 0}°",
+                                style = PramaanTypography.bodySmall,
+                                color = PramaanOutline
+                            )
+                            Text(
+                                text = "Speed: ${String.format("%.2f", curAtt.takeoffSpeedMps ?: 0.0)} m/s",
+                                style = PramaanTypography.bodySmall,
+                                color = PramaanOutline
+                            )
+                            Text(
+                                text = "Knee Dip: ${curAtt.kneeDipDeg?.toInt() ?: 0}°",
+                                style = PramaanTypography.bodySmall,
+                                color = PramaanOutline
+                            )
+                            Text(
+                                text = "Arm Swing: ${curAtt.armSwingIndex?.toInt() ?: 0}",
+                                style = PramaanTypography.bodySmall,
+                                color = PramaanOutline
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Status: ${if (curAtt.valid) "Clean Jump • Good forward drive" else if (curAtt.fouls.isNotEmpty()) "Foul: " + curAtt.fouls.joinToString { it.name } else "Note: " + curAtt.notes.joinToString { it.name }}",
+                            style = PramaanTypography.labelSmall,
+                            color = PramaanOnSurface
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -394,7 +541,10 @@ fun ResultScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Recorded: Today",
+                                text = if (manifest?.test == TestType.BROAD_JUMP)
+                                    "Measured against ${manifest?.calibration?.markerCm?.toInt() ?: 200} cm mark"
+                                else
+                                    "Recorded: Today",
                                 style = PramaanTypography.bodySmall,
                                 color = PramaanOutline
                             )
@@ -418,7 +568,7 @@ fun ResultScreen(
                 }
             }
 
-            // 3. Why is this result verified? 4-Layer Hardware Audit (Stitch Screen 4)
+            // 3. Why is this result verified? Hardware Audit (Stitch Screen 4)
             item {
                 PramaanCard {
                     Row(
@@ -449,7 +599,7 @@ fun ResultScreen(
                                     color = PramaanOnSurface
                                 )
                                 Text(
-                                    text = "Pramaan Trust Engine • 4-Layer Hardware Audit",
+                                    text = "Pramaan Trust Engine • Hardware Audit",
                                     style = PramaanTypography.labelSmall,
                                     color = PramaanOutline
                                 )
@@ -460,26 +610,54 @@ fun ResultScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AuditCheckRow(
-                            title = "Camera was completely stationary",
-                            subtitle = "Tripod gyroscope stability variance < 0.12 rad/s",
-                            passed = manifest?.checks?.find { it.id == "C4" }?.pass ?: true
-                        )
-                        AuditCheckRow(
-                            title = "Real-time gravity confirmed",
-                            subtitle = "9.8 m/s² natural acceleration verified against frame rate",
-                            passed = manifest?.checks?.find { it.id == "C2" }?.pass ?: true
-                        )
-                        AuditCheckRow(
-                            title = "Dual calculation match",
-                            subtitle = "Flight time aligns with anatomical hip rise within tolerance",
-                            passed = manifest?.checks?.find { it.id == "C3" }?.pass ?: true
-                        )
-                        AuditCheckRow(
-                            title = "Cryptographically sealed on this phone",
-                            subtitle = "Hardware-backed Android Keystore ECDSA P-256 seal",
-                            passed = manifest?.checks?.find { it.id == "C1" }?.pass ?: true
-                        )
+                        if (manifest?.test == TestType.BROAD_JUMP) {
+                            AuditCheckRow(
+                                title = "Hardware Cryptographic Seal (C1)",
+                                subtitle = "Hardware-backed Android Keystore ECDSA P-256 seal & hashes match",
+                                passed = manifest?.checks?.find { it.id == "C1" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Gravity Parabola Trajectory (C2)",
+                                subtitle = "Hip parabolic acceleration conforms to 9.8 m/s² natural gravity",
+                                passed = manifest?.checks?.find { it.id == "C2" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Horizontal Motion Consistency (C3)",
+                                subtitle = "Forward linearity and velocity within biomechanical limits",
+                                passed = manifest?.checks?.find { it.id == "C3" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Camera was completely stationary (C4)",
+                                subtitle = "Tripod gyroscope stability variance < 0.12 rad/s",
+                                passed = manifest?.checks?.find { it.id == "C4" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Ground Calibration Agreement (C5)",
+                                subtitle = "Tape marker scale agrees with registered athlete height scale (diff ≤ 10%)",
+                                passed = manifest?.checks?.find { it.id == "C5" }?.pass ?: true
+                            )
+                        } else {
+                            AuditCheckRow(
+                                title = "Camera was completely stationary",
+                                subtitle = "Tripod gyroscope stability variance < 0.12 rad/s",
+                                passed = manifest?.checks?.find { it.id == "C4" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Real-time gravity confirmed",
+                                subtitle = "9.8 m/s² natural acceleration verified against frame rate",
+                                passed = manifest?.checks?.find { it.id == "C2" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Dual calculation match",
+                                subtitle = "Flight time aligns with anatomical hip rise within tolerance",
+                                passed = manifest?.checks?.find { it.id == "C3" }?.pass ?: true
+                            )
+                            AuditCheckRow(
+                                title = "Cryptographically sealed on this phone",
+                                subtitle = "Hardware-backed Android Keystore ECDSA P-256 seal",
+                                passed = manifest?.checks?.find { it.id == "C1" }?.pass ?: true
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))

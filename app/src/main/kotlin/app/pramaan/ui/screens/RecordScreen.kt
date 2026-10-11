@@ -56,6 +56,7 @@ import app.pramaan.core.model.PoseFrame
 import app.pramaan.core.model.TestType
 import app.pramaan.core.scoring.SitUpAnalyzer
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.BroadJumpLiveTracker
 import app.pramaan.data.AthleteEntity
 import app.pramaan.ui.components.CameraPermissionGate
 import app.pramaan.ui.components.PramaanButton
@@ -123,6 +124,7 @@ private fun RecordContent(
     // Recent frames buffer for scoring
     val frameBuffer = remember { mutableStateListOf<PoseFrame>() }
     var frameCounter by remember { mutableIntStateOf(0) }
+    val bjTracker = remember(athleteProfile) { BroadJumpLiveTracker(athleteProfile?.heightCm ?: 165.0) }
 
     // Load athlete profile
     LaunchedEffect(athleteId) {
@@ -185,6 +187,25 @@ private fun RecordContent(
                     bestBenchmark = provisionalMetric
                     toastText = "Rep ${result.totalReps} • Flexion Valid"
                     liveFeedback = "Rep valid: flexed > 70°"
+                } else if (testType == TestType.BROAD_JUMP) {
+                    val state = bjTracker.onFrame(frame)
+                    if (state.standingStill) {
+                        toastText = "Standing Steady • Ready to Jump"
+                        liveFeedback = "Ready — jump when you like"
+                    } else if (state.attemptsDetected == 0) {
+                        liveFeedback = "Hold still behind the line to begin"
+                    }
+                    if (state.attemptsDetected > 0) {
+                        attemptNumber = (state.attemptsDetected + 1).coerceAtMost(3)
+                    }
+                    if (state.lastApproxCm != null) {
+                        provisionalMetric = Math.round(state.lastApproxCm!! * 10.0) / 10.0
+                        if (provisionalMetric > bestBenchmark) {
+                            bestBenchmark = provisionalMetric
+                        }
+                        toastText = "Landing Detected • ≈ ${provisionalMetric.toInt()} cm"
+                        liveFeedback = "Attempt recorded • Walk back for next attempt"
+                    }
                 }
             }
         }
@@ -209,22 +230,24 @@ private fun RecordContent(
                 container.poseEngine.stopRecording()
                 container.gyroRecorder.stopRecording(gyroFile)
 
-                val prof = athleteProfile ?: app.pramaan.api.dto.AccountProfileDto(
-                    id = athleteId,
-                    role = "ATHLETE",
-                    name = "Athlete",
-                    sex = "M",
-                    heightCm = 165.0,
-                    weightKg = 55.0
-                )
+                if (testType != TestType.BROAD_JUMP) {
+                    val prof = athleteProfile ?: app.pramaan.api.dto.AccountProfileDto(
+                        id = athleteId,
+                        role = "ATHLETE",
+                        name = "Athlete",
+                        sex = "M",
+                        heightCm = 165.0,
+                        weightKg = 55.0
+                    )
 
-                val fps = container.poseEngine.measuredFps
-                container.sealer.sealSession(
-                    sessionId = sessionId,
-                    testType = testType,
-                    athleteProfile = prof,
-                    fps = fps
-                )
+                    val fps = container.poseEngine.measuredFps
+                    container.sealer.sealSession(
+                        sessionId = sessionId,
+                        testType = testType,
+                        athleteProfile = prof,
+                        fps = fps
+                    )
+                }
             }
             onFinished(sessionId)
         }
@@ -336,7 +359,11 @@ private fun RecordContent(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (testType == TestType.VERTICAL_JUMP) "Attempt $attemptNumber of 3" else "30s Cadence",
+                        text = when (testType) {
+                            TestType.VERTICAL_JUMP -> "Attempt $attemptNumber of 3"
+                            TestType.BROAD_JUMP -> "Jump $attemptNumber of 3"
+                            TestType.SIT_UPS -> "30s Cadence"
+                        },
                         style = PramaanTypography.labelSmall,
                         color = Color(0xFF7CF994)
                     )
@@ -438,7 +465,11 @@ private fun RecordContent(
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = if (testType == TestType.VERTICAL_JUMP) "PROVISIONAL HEIGHT" else "REPETITIONS",
+                                    text = when (testType) {
+                                        TestType.VERTICAL_JUMP -> "PROVISIONAL HEIGHT"
+                                        TestType.BROAD_JUMP -> "≈ APPROX DISTANCE"
+                                        TestType.SIT_UPS -> "REPETITIONS"
+                                    },
                                     style = PramaanTypography.labelSmall,
                                     color = PramaanOutline
                                 )
@@ -460,13 +491,17 @@ private fun RecordContent(
                             Spacer(modifier = Modifier.height(2.dp))
                             Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
-                                    text = if (testType == TestType.VERTICAL_JUMP) "$provisionalMetric" else "${provisionalMetric.toInt()}",
+                                    text = when (testType) {
+                                        TestType.VERTICAL_JUMP -> "$provisionalMetric"
+                                        TestType.BROAD_JUMP -> if (provisionalMetric > 0) "≈ ${provisionalMetric.toInt()}" else "—"
+                                        TestType.SIT_UPS -> "${provisionalMetric.toInt()}"
+                                    },
                                     style = PramaanTypography.displayLarge,
                                     color = PramaanOnSurface
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (testType == TestType.VERTICAL_JUMP) "cm" else "reps",
+                                    text = if (testType == TestType.SIT_UPS) "reps" else "cm",
                                     style = PramaanTypography.titleMedium,
                                     color = PramaanOutline,
                                     modifier = Modifier.padding(bottom = 6.dp)
@@ -487,7 +522,7 @@ private fun RecordContent(
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(Color(0xFFF1F5F9))
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
+                                ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
                                         imageVector = Icons.Default.MilitaryTech,
@@ -497,7 +532,11 @@ private fun RecordContent(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "Best: $bestBenchmark ${if (testType == TestType.VERTICAL_JUMP) "cm" else "reps"}",
+                                        text = when (testType) {
+                                            TestType.VERTICAL_JUMP -> "Best: $bestBenchmark cm"
+                                            TestType.BROAD_JUMP -> "Best: ≈ ${bestBenchmark.toInt()} cm"
+                                            TestType.SIT_UPS -> "Best: ${bestBenchmark.toInt()} reps"
+                                        },
                                         style = PramaanTypography.labelMedium,
                                         color = PramaanOnSurface
                                     )

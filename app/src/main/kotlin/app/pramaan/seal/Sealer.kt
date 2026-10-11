@@ -3,6 +3,7 @@ package app.pramaan.seal
 import app.pramaan.api.dto.AccountProfileDto
 import app.pramaan.core.crypto.Sha256
 import app.pramaan.core.integrity.IntegrityEngine
+import app.pramaan.core.manifest.AnalysisFrameDimensions
 import app.pramaan.core.manifest.AthleteManifestInfo
 import app.pramaan.core.manifest.CanonicalJson
 import app.pramaan.core.manifest.FileHashes
@@ -18,9 +19,16 @@ import app.pramaan.core.scoring.JumpResult
 import app.pramaan.core.scoring.SitUpAnalyzer
 import app.pramaan.core.scoring.SitUpResult
 import app.pramaan.core.scoring.VerticalJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.AthleteInfo
+import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
+import app.pramaan.core.scoring.broadjump.BroadJumpResult
+import app.pramaan.core.scoring.broadjump.CalibMode
+import app.pramaan.core.scoring.broadjump.GroundCalibration
+import app.pramaan.core.scoring.broadjump.NormPoint
 import app.pramaan.data.SessionDao
 import app.pramaan.data.SessionEntity
 import app.pramaan.data.SessionStore
+import java.io.File
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Base64
@@ -41,7 +49,9 @@ class Sealer(
         testType: TestType,
         athleteProfile: AccountProfileDto,
         fps: Int = 30,
-        source: String = "CAMERA"
+        source: String = "CAMERA",
+        calibration: GroundCalibration? = null,
+        extraFiles: Map<String, File> = emptyMap()
     ): SessionManifest {
         val sessionDir = sessionStore.getSessionDir(sessionId)
         val videoFile = sessionStore.getVideoFile(sessionId)
@@ -60,6 +70,7 @@ class Sealer(
 
         var jumpResult: JumpResult? = null
         var sitUpResult: SitUpResult? = null
+        var broadJumpResult: BroadJumpResult? = null
 
         val sessionResult: SessionResult = when (testType) {
             TestType.VERTICAL_JUMP -> {
@@ -88,13 +99,38 @@ class Sealer(
                     rejected = res.rejectedReps
                 )
             }
+            TestType.BROAD_JUMP -> {
+                val calib = calibration ?: GroundCalibration(
+                    mode = CalibMode.HEIGHT_ONLY,
+                    frameW = 1280,
+                    frameH = 720,
+                    calibFrameTNs = 0L,
+                    line = NormPoint(0.2, 0.8),
+                    marker = null,
+                    markerCm = null
+                )
+                val athleteInfo = AthleteInfo(
+                    heightCm = heightCm,
+                    ageYears = athleteProfile.age ?: 16,
+                    sex = athleteProfile.sex ?: "F"
+                )
+                val res = BroadJumpAnalyzer.analyze(frames, calib, athleteInfo)
+                broadJumpResult = res
+                SessionResult(
+                    unit = "cm",
+                    best = res.best ?: 0.0,
+                    broadJumpAttempts = res.attempts
+                )
+            }
         }
 
         val (checks, badge) = IntegrityEngine.evaluateAtSeal(
             testType = testType,
             source = source,
             jumpResult = jumpResult,
-            gyroSamples = gyroSamples
+            gyroSamples = gyroSamples,
+            broadJumpResult = broadJumpResult,
+            athleteHeightCm = heightCm
         )
 
         val allChecks = buildList {
@@ -112,7 +148,32 @@ class Sealer(
         val videoHash = if (videoFile.exists()) videoFile.inputStream().use { Sha256.hash(it) } else ""
         val framesHash = if (framesFile.exists()) framesFile.inputStream().use { Sha256.hash(it) } else ""
         val gyroHash = if (gyroFile.exists()) gyroFile.inputStream().use { Sha256.hash(it) } else ""
-        val hashes = FileHashes(video = videoHash, frames = framesHash, gyro = gyroHash)
+
+        val calibFrameFile = extraFiles["calib_frame.jpg"] ?: sessionStore.getCalibFrameFile(sessionId)
+        val calibHash = if (calibFrameFile.exists()) calibFrameFile.inputStream().use { Sha256.hash(it) } else null
+
+        val stillsDir = sessionStore.getStillsDir(sessionId)
+        val stillsMap = mutableMapOf<String, String>()
+        if (stillsDir.exists() && stillsDir.isDirectory) {
+            stillsDir.listFiles()?.filter { it.isFile }?.forEach { f ->
+                val key = f.nameWithoutExtension
+                stillsMap[key] = f.inputStream().use { Sha256.hash(it) }
+            }
+        }
+        extraFiles.filter { it.key.startsWith("still_") || it.key.startsWith("att") }.forEach { (name, f) ->
+            if (f.exists()) {
+                val key = name.substringBeforeLast('.')
+                stillsMap[key] = f.inputStream().use { Sha256.hash(it) }
+            }
+        }
+
+        val hashes = FileHashes(
+            video = videoHash,
+            frames = framesHash,
+            gyro = gyroHash,
+            calibFrame = calibHash,
+            stills = if (stillsMap.isNotEmpty()) stillsMap else null
+        )
 
         val isoDateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
@@ -144,7 +205,10 @@ class Sealer(
             hashes = hashes,
             result = sessionResult,
             checks = allChecks,
-            badge = badge
+            badge = badge,
+            analyzerVersion = if (testType == TestType.BROAD_JUMP) (broadJumpResult?.analyzerVersion ?: "1.0") else null,
+            analysisFrame = if (calibration != null) AnalysisFrameDimensions(calibration.frameW, calibration.frameH) else null,
+            calibration = calibration
         )
 
         val manifestBytes = CanonicalJson.encodeToByteArray(manifest)

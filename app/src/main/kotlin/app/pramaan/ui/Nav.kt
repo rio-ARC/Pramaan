@@ -22,6 +22,7 @@ import app.pramaan.ui.athlete.ProfileScreen
 import app.pramaan.ui.athlete.ShowQrScreen
 import app.pramaan.ui.athlete.SubmissionDetailScreen
 import app.pramaan.ui.athlete.SubmissionsScreen
+import app.pramaan.ui.broadjump.BroadJumpCalibrationScreen
 import app.pramaan.ui.coach.CoachHistoryScreen
 import app.pramaan.ui.coach.CoachHomeScreen
 import app.pramaan.ui.coach.CoachScanScreen
@@ -72,6 +73,9 @@ object Routes {
 
     const val RESULT = "result/{sessionId}"
     fun result(sessionId: String) = "result/$sessionId"
+
+    const val BROAD_JUMP_CALIBRATION = "broad_jump_calibration/{sessionId}"
+    fun broadJumpCalibration(sessionId: String) = "broad_jump_calibration/$sessionId"
 
     const val SHOW_QR = "show_qr/{sessionId}"
     fun showQr(sessionId: String) = "show_qr/$sessionId"
@@ -247,7 +251,30 @@ fun PramaanNavHost(
                 testType = testType,
                 container = container,
                 onFinished = { sessionId ->
-                    navController.navigate(Routes.result(sessionId)) {
+                    if (testType == TestType.BROAD_JUMP) {
+                        navController.navigate(Routes.broadJumpCalibration(sessionId)) {
+                            popUpTo(Routes.ATHLETE_HOME)
+                        }
+                    } else {
+                        navController.navigate(Routes.result(sessionId)) {
+                            popUpTo(Routes.ATHLETE_HOME)
+                        }
+                    }
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.BROAD_JUMP_CALIBRATION,
+            arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+            BroadJumpCalibrationScreen(
+                sessionId = sessionId,
+                container = container,
+                onCalibrationComplete = { sid ->
+                    navController.navigate(Routes.result(sid)) {
                         popUpTo(Routes.ATHLETE_HOME)
                     }
                 },

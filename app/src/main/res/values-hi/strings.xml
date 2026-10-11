@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">प्रमाण</string>
+    <string name="bj_title">खड़े होकर लंबी कूद</string>
+    <string name="bj_foul_toes_over_line">पंजे रेखा के पार चले गए</string>
+    <string name="bj_foul_step_or_hop">कूदने से पहले कदम या हॉप</string>
+    <string name="bj_foul_one_foot">दोनों पैरों से एक साथ उछलें</string>
+    <string name="bj_note_fall_back">हाथ या कूल्हे एड़ियों के पीछे लगे; दूरी उसी बिंदु तक मापी गई</string>
+    <string name="bj_calib_tap_line">रेखा के आगे वाले किनारे (0 सेमी) पर टैप करें</string>
+    <string name="bj_calib_tap_mark">टेप पर %d सेमी के निशान पर टैप करें</string>
+    <string name="fb_bj_deeper_dip">कूदने से पहले घुटने थोड़े और मोड़ें</string>
+    <string name="fb_bj_swing_arms">हाथों को पीछे ले जाकर आगे और ऊपर झटकें</string>
+    <string name="fb_bj_launch_higher">केवल आगे नहीं, थोड़ा ऊपर की ओर भी उछलें</string>
+    <string name="fb_bj_launch_flatter">थोड़ा सीधा आगे की ओर उछलें</string>
+    <string name="fb_bj_reach_forward">उतरते समय पैर आगे की ओर बढ़ाएँ</string>
+    <string name="fb_bj_good">अच्छी कूद। यही तकनीक बनाए रखें</string>
+</resources>

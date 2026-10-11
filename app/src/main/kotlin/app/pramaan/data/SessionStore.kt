@@ -23,6 +23,8 @@ class SessionStore(private val context: Context) {
     fun getSigFile(sessionId: String): File = File(getSessionDir(sessionId), "manifest.sig")
     fun getWitnessFile(sessionId: String): File = File(getSessionDir(sessionId), "witness.json")
     fun getCertFile(sessionId: String): File = File(getSessionDir(sessionId), "cert.jws")
+    fun getCalibFrameFile(sessionId: String): File = File(getSessionDir(sessionId), "calib_frame.jpg")
+    fun getStillsDir(sessionId: String): File = File(getSessionDir(sessionId), "stills").apply { if (!exists()) mkdirs() }
 
     fun getAllSessionDirs(): List<File> {
         return sessionsRoot.listFiles()?.filter { it.isDirectory } ?: emptyList()
