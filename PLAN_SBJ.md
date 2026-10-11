@@ -158,13 +158,17 @@
 - [x] Implement server test suite `Phase5BroadJumpServerTest.kt` covering **T-BJ-S1 through T-BJ-S5** + rescore mismatch (all 6 tests passing).
 - **Master Acceptance Condition:** Two-role workflow (Athlete submits SBJ $\rightarrow$ Server re-scores $\rightarrow$ Coach reviews stills & signs $\rightarrow$ Certificate verifies) passes end-to-end.
 
-### Phase 4: Accuracy Validation Module
-- **Scope:**
-  - Create `validation_entries` database table in `Db.kt`.
-  - Create `AccuracyStats.kt` in `:core` to calculate MAE, SD, 95% LoA, % within ±2 cm (Wilson interval), and foul recall/precision.
-  - Implement `/validation` dashboard route in `DashboardPages.kt` with Bland-Altman SVG plot, AI vs. Tape scatter plot, and CSV import/export.
-  - Add server test **T-BJ-S6**.
-- **Master Acceptance Condition:** Validation data ingestion and statistical calculation function accurately.
+### Phase 4: Accuracy Validation Module (Complete)
+- [x] Create `validation_entries` database table in `Db.kt` and `ValidationRepo`.
+- [x] Create pure Kotlin `AccuracyStats.kt` in `:core` to calculate MAE, SD, 95% LoA, % within ±2 cm (Wilson interval), and foul recall/precision.
+- [x] Unit test `AccuracyStatsTest.kt` in `:core/src/test` covering hand-calculated fixtures, Wilson score, and foul metrics.
+- [x] Create `ValidationService.kt` with SVG generators for Bland-Altman agreement plot and AI vs Tape scatter plot.
+- [x] Implement `/validation` dashboard route in `DashboardPages.kt` with headline concordance row, stats summary, inline SVG plots, foul confusion table, mode comparison, worst 5 attempts, collapsed TUNE block, and CSV import/export.
+- [x] Add tape measurement entry form per attempt in `renderSubmissionDetailPage`.
+- [x] Implement `ValidationRoutes.kt` with `/validation`, `POST /validation/import`, `GET /validation/export.csv`, and `POST /validation/entry`.
+- [x] Add server test **T-BJ-S6** in `Phase5BroadJumpServerTest.kt` verifying hand-calculated stats on a 5-row fixture.
+- **Master Acceptance Condition:** Validation data ingestion, statistical calculations, SVG plots, and CSV import/export function accurately and tests pass green.
 
 ### Phase 5 & 6: Polish & Rehearsal
 - **Scope:** Error handling, edge cases (no jump detected, extreme tilt warning), localized UI review, and final live demo rehearsals.
+

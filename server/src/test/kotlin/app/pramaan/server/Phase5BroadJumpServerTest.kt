@@ -22,11 +22,15 @@ import app.pramaan.core.scoring.broadjump.BroadJumpAnalyzer
 import app.pramaan.core.scoring.broadjump.BroadJumpParams
 import app.pramaan.core.scoring.broadjump.CalibMode
 import app.pramaan.core.scoring.broadjump.GroundCalibration
+import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.html.html
+import kotlinx.html.stream.createHTML
+import app.pramaan.server.DashboardPages.renderValidationPage
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -504,4 +508,74 @@ class Phase5BroadJumpServerTest {
         mismatchCheck shouldNotBe null
         mismatchCheck!!.pass shouldBe false
     }
+
+    @Test
+    fun `T-BJ-S6 CSV import then validation Stats match values computed by hand on a 5-row fixture`() {
+        val sessionFixtures = listOf(
+            Pair("ses_val_1", 200.5),
+            Pair("ses_val_2", 179.0),
+            Pair("ses_val_3", 211.5),
+            Pair("ses_val_4", 194.5),
+            Pair("ses_val_5", 204.0)
+        )
+        for ((sid, aiDist) in sessionFixtures) {
+            ServerDb.saveOrUpdate(
+                ServerSessionRecord(
+                    id = sid,
+                    athleteId = "ATH-VAL",
+                    athleteInitials = "AV",
+                    test = "BROAD_JUMP",
+                    best = aiDist,
+                    unit = "cm",
+                    status = "APPROVED",
+                    integrity = "VERIFIED",
+                    submittedAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        val csvFixture = """
+            sessionId,attempt,tapeCm,truthFoul,dataSet
+            ses_val_1,1,200.0,NONE,REPORT
+            ses_val_2,1,180.0,NONE,REPORT
+            ses_val_3,1,210.0,NONE,REPORT
+            ses_val_4,1,195.0,NONE,REPORT
+            ses_val_5,1,205.0,NONE,REPORT
+        """.trimIndent()
+
+        val importedCount = ValidationRepo.bulkImportCsv(csvFixture)
+        importedCount shouldBe 5
+
+        val comparisons = ValidationService.getComparisons()
+        comparisons.size shouldBe 5
+
+        val stats = ValidationService.getAccuracyStats()
+        val rep = stats.reportStats
+
+        rep.n shouldBe 5
+        rep.meanBiasCm shouldBe -0.1
+        rep.maeCm shouldBe 0.9
+        rep.sdCm shouldBe (1.08 plusOrMinus 0.02)
+        rep.loaLowerCm shouldBe (-2.22 plusOrMinus 0.05)
+        rep.loaUpperCm shouldBe (2.02 plusOrMinus 0.05)
+        rep.pctWithin2Cm shouldBe 100.0
+        rep.pctWithin3Cm shouldBe 100.0
+        rep.maxErrorCm shouldBe 1.5
+        rep.worstAttempt?.sessionId shouldBe "ses_val_3"
+
+        val html = createHTML().html {
+            renderValidationPage(stats, comparisons, importedCount = 5)
+        }
+        html shouldContain "SPORTS TALENT AI ACCURACY VALIDATION"
+        html shouldContain "SAI BENCHMARK CONCORDANCE"
+        html shouldContain "100.0%"
+        html shouldContain "of 5 attempts within ±2 cm"
+        html shouldContain "MAE"
+        html shouldContain "0.9 cm"
+        html shouldContain "-0.1 cm"
+        html shouldContain "<svg"
+        html shouldContain "SAI ±2 cm Target"
+        html shouldContain "y = x (Perfect Concordance)"
+    }
 }
+

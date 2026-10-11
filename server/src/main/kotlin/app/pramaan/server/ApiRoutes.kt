@@ -86,6 +86,7 @@ fun Route.configureRoutes(
     configureAuthRoutes(photosDir = photosDir)
     configureAthleteRoutes(uploadsDir = uploadsDir, baseUrl = baseUrl)
     configureAdminRoutes(lanIp = lanIp, uploadsDir = uploadsDir)
+    configureValidationRoutes()
 
     val reviewService = ReviewService(
         accountRepo = AccountRepo,

@@ -4,6 +4,8 @@ import app.pramaan.core.model.Badge
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
@@ -76,6 +78,28 @@ object SessionEventsTable : Table("session_events") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object ValidationEntriesTable : Table("validation_entries") {
+    val id = integer("id").autoIncrement()
+    val sessionId = varchar("session_id", 64)
+    val attempt = integer("attempt")
+    val tapeCm = double("tape_cm")
+    val truthFoul = varchar("truth_foul", 32).default("NONE")
+    val dataSet = varchar("data_set", 16).default("REPORT") // TUNE | REPORT
+    val enteredAt = long("entered_at")
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+data class ValidationEntryRecord(
+    val id: Int = 0,
+    val sessionId: String,
+    val attempt: Int,
+    val tapeCm: Double,
+    val truthFoul: String = "NONE",
+    val dataSet: String = "REPORT",
+    val enteredAt: Long = System.currentTimeMillis()
+)
+
 data class AccountRecord(
     val id: String,
     val role: String,
@@ -141,8 +165,12 @@ object ServerDb {
                 AccountsTable,
                 TokensTable,
                 SessionsTable,
-                SessionEventsTable
+                SessionEventsTable,
+                ValidationEntriesTable
             )
+            try {
+                exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_val_ses_att ON validation_entries(session_id, attempt)")
+            } catch (_: Exception) {}
             // Safe fallback in case SQLite table existed with legacy NOT NULL badge or synced_at
             try {
                 exec("ALTER TABLE sessions ADD COLUMN integrity VARCHAR(32)")
@@ -248,3 +276,88 @@ object ServerDb {
         }
     }
 }
+
+object ValidationRepo {
+    private fun mapRow(row: org.jetbrains.exposed.sql.ResultRow): ValidationEntryRecord {
+        return ValidationEntryRecord(
+            id = row[ValidationEntriesTable.id],
+            sessionId = row[ValidationEntriesTable.sessionId],
+            attempt = row[ValidationEntriesTable.attempt],
+            tapeCm = row[ValidationEntriesTable.tapeCm],
+            truthFoul = row[ValidationEntriesTable.truthFoul],
+            dataSet = row[ValidationEntriesTable.dataSet],
+            enteredAt = row[ValidationEntriesTable.enteredAt]
+        )
+    }
+
+    fun getAll(): List<ValidationEntryRecord> = transaction {
+        ValidationEntriesTable.selectAll()
+            .orderBy(ValidationEntriesTable.enteredAt to org.jetbrains.exposed.sql.SortOrder.DESC)
+            .map { mapRow(it) }
+    }
+
+    fun getBySessionId(sessionId: String): List<ValidationEntryRecord> = transaction {
+        ValidationEntriesTable.selectAll()
+            .where { ValidationEntriesTable.sessionId eq sessionId }
+            .orderBy(ValidationEntriesTable.attempt to org.jetbrains.exposed.sql.SortOrder.ASC)
+            .map { mapRow(it) }
+    }
+
+    fun upsert(entry: ValidationEntryRecord) = transaction {
+        val existing = ValidationEntriesTable.selectAll()
+            .where { (ValidationEntriesTable.sessionId eq entry.sessionId) and (ValidationEntriesTable.attempt eq entry.attempt) }
+            .firstOrNull()
+
+        if (existing != null) {
+            ValidationEntriesTable.update({ (ValidationEntriesTable.sessionId eq entry.sessionId) and (ValidationEntriesTable.attempt eq entry.attempt) }) {
+                it[tapeCm] = entry.tapeCm
+                it[truthFoul] = entry.truthFoul
+                it[dataSet] = entry.dataSet
+                it[enteredAt] = entry.enteredAt
+            }
+        } else {
+            ValidationEntriesTable.insert {
+                it[sessionId] = entry.sessionId
+                it[attempt] = entry.attempt
+                it[tapeCm] = entry.tapeCm
+                it[truthFoul] = entry.truthFoul
+                it[dataSet] = entry.dataSet
+                it[enteredAt] = entry.enteredAt
+            }
+        }
+    }
+
+    fun bulkImportCsv(csvText: String): Int {
+        var count = 0
+        val lines = csvText.lines()
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.isBlank() || trimmed.startsWith("#") || trimmed.startsWith("sessionId", ignoreCase = true)) continue
+            val parts = trimmed.split(",").map { it.trim() }
+            if (parts.size >= 3) {
+                val sid = parts[0]
+                val att = parts[1].toIntOrNull() ?: continue
+                val tape = parts[2].toDoubleOrNull() ?: continue
+                val foul = if (parts.size >= 4 && parts[3].isNotBlank()) parts[3].uppercase() else "NONE"
+                val set = if (parts.size >= 5 && parts[4].isNotBlank()) parts[4].uppercase() else "REPORT"
+                upsert(
+                    ValidationEntryRecord(
+                        sessionId = sid,
+                        attempt = att,
+                        tapeCm = tape,
+                        truthFoul = foul,
+                        dataSet = set,
+                        enteredAt = System.currentTimeMillis()
+                    )
+                )
+                count++
+            }
+        }
+        return count
+    }
+
+    fun delete(id: Int): Boolean = transaction {
+        ValidationEntriesTable.deleteWhere { ValidationEntriesTable.id eq id } > 0
+    }
+}
+

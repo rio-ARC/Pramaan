@@ -5,6 +5,8 @@ import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.model.Badge
 import app.pramaan.core.model.CheckResult
 import app.pramaan.core.model.TestType
+import app.pramaan.core.validation.ComprehensiveAccuracyStats
+import app.pramaan.core.validation.ValidationAttemptComparison
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.nimbusds.jwt.JWTClaimsSet
@@ -27,7 +29,9 @@ import kotlinx.html.label
 import kotlinx.html.link
 import kotlinx.html.meta
 import kotlinx.html.nav
+import kotlinx.html.option
 import kotlinx.html.p
+import kotlinx.html.select
 import kotlinx.html.span
 import kotlinx.html.style
 import kotlinx.html.table
@@ -164,6 +168,7 @@ object DashboardPages {
             a(classes = "nav-tab ${if (activeTab == "submissions") "active" else ""}", href = "/submissions") { +"Submissions" }
             a(classes = "nav-tab ${if (activeTab == "athletes") "active" else ""}", href = "/athletes") { +"Athletes" }
             a(classes = "nav-tab ${if (activeTab == "coaches") "active" else ""}", href = "/coaches") { +"Coaches" }
+            a(classes = "nav-tab ${if (activeTab == "validation") "active" else ""}", href = "/validation") { +"Accuracy Validation" }
         }
     }
 
@@ -595,6 +600,81 @@ object DashboardPages {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // Ground Truth Tape Entry Card
+                    val valEntries = ValidationRepo.getBySessionId(session.id)
+                    div(classes = "table-card") {
+                        attributes["style"] = "padding: 20px; background: #F8FAFC;"
+                        h3 { +"Ground Truth Tape Measure Validation" }
+                        p {
+                            attributes["style"] = "font-size: 13px; color: #475569; margin-bottom: 12px;"
+                            +"Record or update physical tape measure readings for this session to include in the validation study."
+                        }
+                        val attemptCount = if (attempts.isNotEmpty()) attempts.size else 3
+                        for (attIdx in 1..attemptCount) {
+                            val existing = valEntries.find { it.attempt == attIdx }
+                            val aiAttempt = attempts.find { it.index == attIdx }
+                            form(action = "/validation/entry", method = kotlinx.html.FormMethod.post) {
+                                attributes["style"] = "display: flex; gap: 12px; align-items: center; margin-bottom: 10px; background: white; padding: 10px 14px; border-radius: 8px; border: 1px solid #E2E8F0; flex-wrap: wrap;"
+                                input(type = kotlinx.html.InputType.hidden, name = "sessionId") { attributes["value"] = session.id }
+                                input(type = kotlinx.html.InputType.hidden, name = "attempt") { attributes["value"] = attIdx.toString() }
+
+                                span(classes = "mono") {
+                                    attributes["style"] = "font-weight: 700; min-width: 70px;"
+                                    +"Jump $attIdx:"
+                                }
+                                span(classes = "mono") {
+                                    attributes["style"] = "color: #0F172A; min-width: 100px;"
+                                    +"AI: ${if (aiAttempt != null) "${"%.1f".format(aiAttempt.distanceCm)} cm" else "—"}"
+                                }
+                                span {
+                                    attributes["style"] = "font-size: 12px; color: #64748B;"
+                                    +"Tape (cm):"
+                                }
+                                input(type = kotlinx.html.InputType.number, name = "tapeCm") {
+                                    attributes["step"] = "0.1"
+                                    attributes["style"] = "width: 90px; padding: 6px; border: 1px solid #CBD5E1; border-radius: 6px; font-family: monospace;"
+                                    attributes["value"] = existing?.tapeCm?.toString() ?: ""
+                                    attributes["required"] = "required"
+                                }
+                                span {
+                                    attributes["style"] = "font-size: 12px; color: #64748B;"
+                                    +"Truth Foul:"
+                                }
+                                select {
+                                    attributes["name"] = "truthFoul"
+                                    attributes["style"] = "padding: 6px; border: 1px solid #CBD5E1; border-radius: 6px;"
+                                    val currentFoul = existing?.truthFoul ?: "NONE"
+                                    listOf("NONE", "TOES_OVER_LINE", "STEP_OR_HOP", "ONE_FOOT_TAKEOFF", "FALL_BACK").forEach { f ->
+                                        option {
+                                            attributes["value"] = f
+                                            if (f == currentFoul) attributes["selected"] = "selected"
+                                            +f
+                                        }
+                                    }
+                                }
+                                span {
+                                    attributes["style"] = "font-size: 12px; color: #64748B;"
+                                    +"Dataset:"
+                                }
+                                select {
+                                    attributes["name"] = "dataSet"
+                                    attributes["style"] = "padding: 6px; border: 1px solid #CBD5E1; border-radius: 6px;"
+                                    val currentSet = existing?.dataSet ?: "REPORT"
+                                    listOf("REPORT", "TUNE").forEach { s ->
+                                        option {
+                                            attributes["value"] = s
+                                            if (s == currentSet) attributes["selected"] = "selected"
+                                            +s
+                                        }
+                                    }
+                                }
+                                button(classes = "btn", type = kotlinx.html.ButtonType.submit) {
+                                    +if (existing != null) "Update" else "Record Reading"
                                 }
                             }
                         }
@@ -1113,4 +1193,339 @@ object DashboardPages {
             }
         }
     }
+
+    fun HTML.renderValidationPage(
+        stats: ComprehensiveAccuracyStats,
+        comparisons: List<ValidationAttemptComparison>,
+        importedCount: Int? = null
+    ) {
+        val rep = stats.reportStats
+        val heightOnly = stats.heightOnlyStats
+        val fouls = stats.foulStats
+        val tune = stats.tuneStats
+
+        head {
+            title { +"PRAMAAN • Sports Talent AI Accuracy Validation" }
+            meta(charset = "utf-8")
+            meta(name = "viewport", content = "width=device-width, initial-scale=1.0")
+            link(rel = "stylesheet", href = "https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap")
+            style { unsafe { raw(commonStyles()) } }
+        }
+        body {
+            div(classes = "container") {
+                header {
+                    div(classes = "title-block") {
+                        h1 { +"SPORTS TALENT AI ACCURACY VALIDATION" }
+                        p { +"Ground-Truth Tape Measure Concordance • SAI Talent Identification Benchmark Audit" }
+                    }
+                    div {
+                        a(classes = "btn", href = "/validation/export.csv") { +"📥 Export Ground Truth CSV" }
+                    }
+                }
+                renderNav("validation")
+
+                if (importedCount != null && importedCount > 0) {
+                    div(classes = "alert-banner") {
+                        +"✓ Successfully imported $importedCount ground truth validation entries."
+                    }
+                }
+
+                // 1. Headline row
+                div {
+                    attributes["style"] = "background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%); color: white; padding: 22px 26px; border-radius: 16px; margin-bottom: 24px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);"
+                    div {
+                        attributes["style"] = "font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #38BDF8; font-weight: 700; margin-bottom: 6px;"
+                        +"SAI BENCHMARK CONCORDANCE (TARGET: ±2 CM)"
+                    }
+                    div {
+                        attributes["style"] = "font-size: 21px; font-weight: 700; line-height: 1.4;"
+                        +"SAI threshold ±2 cm · measured: "
+                        span {
+                            attributes["style"] = "color: #4ADE80; font-family: 'Space Grotesk', monospace;"
+                            +"${rep.pctWithin2Cm}%"
+                        }
+                        +" of ${rep.n} attempts within ±2 cm "
+                        span {
+                            attributes["style"] = "font-size: 15px; color: #94A3B8; font-weight: 500;"
+                            +"(95% CI ${rep.wilson2Cm.lowerPct}%–${rep.wilson2Cm.upperPct}%)"
+                        }
+                        +" · MAE "
+                        span {
+                            attributes["style"] = "color: #FBBF24; font-family: 'Space Grotesk', monospace;"
+                            +"${rep.maeCm} cm"
+                        }
+                    }
+                }
+
+                // 2. Statistics Table (REPORT Set)
+                div(classes = "table-card") {
+                    attributes["style"] = "padding: 20px;"
+                    h3 { +"Statistical Concordance Summary (REPORT Dataset)" }
+                    p {
+                        attributes["style"] = "font-size: 13px; color: #64748B; margin-bottom: 14px;"
+                        +"Evaluated against physical tape measure readings with chalk heel contact verification."
+                    }
+                    table {
+                        thead {
+                            tr {
+                                th { +"Sample Size (n)" }
+                                th { +"Mean Bias (d)" }
+                                th { +"MAE" }
+                                th { +"Std Dev (SD)" }
+                                th { +"95% LoA" }
+                                th { +"% Within ±2 cm" }
+                                th { +"% Within ±3 cm" }
+                                th { +"Max Error" }
+                            }
+                        }
+                        tbody {
+                            tr {
+                                td(classes = "mono") { +"${rep.n}" }
+                                td(classes = "mono") {
+                                    val prefix = if (rep.meanBiasCm > 0) "+" else ""
+                                    +"$prefix${rep.meanBiasCm} cm"
+                                }
+                                td(classes = "mono") { +"${rep.maeCm} cm" }
+                                td(classes = "mono") { +"${rep.sdCm} cm" }
+                                td(classes = "mono") { +"[${rep.loaLowerCm} .. +${rep.loaUpperCm}] cm" }
+                                td(classes = "mono") {
+                                    attributes["style"] = "font-weight: 700; color: #16A34A;"
+                                    +"${rep.pctWithin2Cm}% (${rep.wilson2Cm.lowerPct}%–${rep.wilson2Cm.upperPct}%)"
+                                }
+                                td(classes = "mono") { +"${rep.pctWithin3Cm}%" }
+                                td(classes = "mono") {
+                                    attributes["style"] = "color: #EA580C; font-weight: 600;"
+                                    val sid = rep.worstAttempt?.sessionId?.take(6) ?: ""
+                                    +"${rep.maxErrorCm} cm ${if (sid.isNotBlank()) "(#$sid)" else ""}"
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3 & 4. Bland-Altman and Scatter Plots
+                div {
+                    attributes["style"] = "display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; margin-bottom: 24px;"
+                    div(classes = "table-card") {
+                        attributes["style"] = "padding: 20px;"
+                        h3 { +"Bland–Altman Agreement Analysis" }
+                        p {
+                            attributes["style"] = "font-size: 12px; color: #64748B; margin-bottom: 12px;"
+                            +"X = Mean of AI & Tape, Y = AI − Tape. Shaded green band shows SAI ±2 cm tolerance zone."
+                        }
+                        unsafe { raw(ValidationService.generateBlandAltmanSvg(comparisons.filter { it.dataSet.equals("REPORT", ignoreCase = true) })) }
+                    }
+                    div(classes = "table-card") {
+                        attributes["style"] = "padding: 20px;"
+                        h3 { +"AI vs. Tape Measure Concordance" }
+                        p {
+                            attributes["style"] = "font-size: 12px; color: #64748B; margin-bottom: 12px;"
+                            +"Dashed diagonal line represents perfect identity (y = x)."
+                        }
+                        unsafe { raw(ValidationService.generateScatterSvg(comparisons.filter { it.dataSet.equals("REPORT", ignoreCase = true) })) }
+                    }
+                }
+
+                // 5. Foul Confusion & Detection Accuracy Table
+                div(classes = "table-card") {
+                    attributes["style"] = "padding: 20px;"
+                    h3 { +"Foul & Fault Detection Accuracy" }
+                    p {
+                        attributes["style"] = "font-size: 13px; color: #64748B; margin-bottom: 14px;"
+                        +"Staged foul recall: ${fouls.stagedFoulRecallPct}% (${fouls.detectedStaged}/${fouls.totalStaged}) • Clean jumps false foul rate: ${fouls.cleanJumpFalseFoulPct}% (${fouls.falseFoulClean}/${fouls.totalClean})"
+                    }
+                    table {
+                        thead {
+                            tr {
+                                th { +"Foul Code" }
+                                th { +"True Positives (TP)" }
+                                th { +"False Positives (FP)" }
+                                th { +"False Negatives (FN)" }
+                                th { +"Precision" }
+                                th { +"Recall" }
+                            }
+                        }
+                        tbody {
+                            for (f in fouls.byCode) {
+                                tr {
+                                    td(classes = "mono") { +f.foulCode }
+                                    td(classes = "mono") { +"${f.tp}" }
+                                    td(classes = "mono") { +"${f.fp}" }
+                                    td(classes = "mono") { +"${f.fn}" }
+                                    td(classes = "mono") { +"${(f.precision * 100).toInt()}%" }
+                                    td(classes = "mono") { +"${(f.recall * 100).toInt()}%" }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 6. Mode Comparison Table (MARKER vs HEIGHT_ONLY)
+                if (heightOnly != null) {
+                    div(classes = "table-card") {
+                        attributes["style"] = "padding: 20px;"
+                        h3 { +"Calibration Mode Comparative Analysis" }
+                        p {
+                            attributes["style"] = "font-size: 13px; color: #64748B; margin-bottom: 14px;"
+                            +"Proves why Marker Calibration is essential for SAI certification, while Height-Only serves as approximate fallback."
+                        }
+                        table {
+                            thead {
+                                tr {
+                                    th { +"Evaluation Metric" }
+                                    th { +"Marker Calibration (Primary)" }
+                                    th { +"Height-Only Scaling (Fallback)" }
+                                }
+                            }
+                            tbody {
+                                tr {
+                                    td { +"Attempts Evaluated" }
+                                    td(classes = "mono") { +"${rep.n}" }
+                                    td(classes = "mono") { +"${heightOnly.n}" }
+                                }
+                                tr {
+                                    td { +"Mean Bias" }
+                                    td(classes = "mono") { +"${rep.meanBiasCm} cm" }
+                                    td(classes = "mono") { +"${heightOnly.meanBiasCm} cm" }
+                                }
+                                tr {
+                                    td { +"Mean Absolute Error (MAE)" }
+                                    td(classes = "mono") {
+                                        attributes["style"] = "color: #16A34A; font-weight: 700;"
+                                        +"${rep.maeCm} cm"
+                                    }
+                                    td(classes = "mono") {
+                                        attributes["style"] = "color: #DC2626; font-weight: 700;"
+                                        +"${heightOnly.maeCm} cm"
+                                    }
+                                }
+                                tr {
+                                    td { +"% within SAI ±2 cm" }
+                                    td(classes = "mono") {
+                                        attributes["style"] = "color: #16A34A; font-weight: 700;"
+                                        +"${rep.pctWithin2Cm}%"
+                                    }
+                                    td(classes = "mono") {
+                                        attributes["style"] = "color: #DC2626; font-weight: 700;"
+                                        +"${heightOnly.pctWithin2Cm}%"
+                                    }
+                                }
+                                tr {
+                                    td { +"Certification Eligibility" }
+                                    td {
+                                        span(classes = "badge-chip badge-VERIFIED") { +"CERTIFIABLE" }
+                                    }
+                                    td {
+                                        span(classes = "badge-chip badge-FLAGGED") { +"APPROXIMATE (FLAGGED)" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 7. Worst 5 Attempts Table
+                val worst = stats.worstAttempts
+                if (worst.isNotEmpty()) {
+                    div(classes = "table-card") {
+                        attributes["style"] = "padding: 20px;"
+                        h3 { +"Audit Log: Largest Discrepancies (Worst 5 Attempts)" }
+                        p {
+                            attributes["style"] = "font-size: 13px; color: #64748B; margin-bottom: 14px;"
+                            +"Transparency check: direct links to inspection stills."
+                        }
+                        table {
+                            thead {
+                                tr {
+                                    th { +"Rank" }
+                                    th { +"Session ID" }
+                                    th { +"Attempt" }
+                                    th { +"Tape Reading" }
+                                    th { +"AI Pramaan" }
+                                    th { +"Error (d)" }
+                                    th { +"Action" }
+                                }
+                            }
+                            tbody {
+                                for ((idx, w) in worst.withIndex()) {
+                                    tr {
+                                        td(classes = "mono") { +"#${idx + 1}" }
+                                        td(classes = "mono") { +w.sessionId }
+                                        td(classes = "mono") { +"Jump ${w.attemptIndex}" }
+                                        td(classes = "mono") { +"${w.tapeCm} cm" }
+                                        td(classes = "mono") { +"${w.aiDistanceCm} cm" }
+                                        td(classes = "mono") {
+                                            attributes["style"] = "font-weight: 700; color: #EA580C;"
+                                            val pfx = if (w.d > 0) "+" else ""
+                                            +"$pfx${String.format(Locale.US, "%.2f", w.d)} cm"
+                                        }
+                                        td {
+                                            a(classes = "btn", href = "/submissions/${w.sessionId}") { +"Audit Session →" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 8. TUNE Set (Collapsible)
+                if (tune != null) {
+                    unsafe {
+                        raw("""
+                            <details style="margin-bottom: 24px; border: 1px solid #E2E8F0; border-radius: 14px; padding: 16px; background: white;">
+                                <summary style="cursor: pointer; font-weight: 700; font-size: 15px; color: #334155;">
+                                    TUNE Dataset Parameters & Baseline (Collapsed)
+                                </summary>
+                                <div style="margin-top: 14px;">
+                                    <p style="font-size: 13px; color: #64748B; margin-bottom: 10px;">
+                                        TUNE set (first 1/3 of participants) used to calibrate heel offset parameter. Not included in official REPORT metrics.
+                                    </p>
+                                    <table style="width: 100%; border-collapse: collapse;">
+                                        <thead>
+                                            <tr>
+                                                <th style="padding: 8px; border-bottom: 1px solid #E2E8F0;">n</th>
+                                                <th style="padding: 8px; border-bottom: 1px solid #E2E8F0;">Mean Bias</th>
+                                                <th style="padding: 8px; border-bottom: 1px solid #E2E8F0;">MAE</th>
+                                                <th style="padding: 8px; border-bottom: 1px solid #E2E8F0;">% ≤ 2 cm</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td style="padding: 8px; font-family: monospace;">${tune.n}</td>
+                                                <td style="padding: 8px; font-family: monospace;">${tune.meanBiasCm} cm</td>
+                                                <td style="padding: 8px; font-family: monospace;">${tune.maeCm} cm</td>
+                                                <td style="padding: 8px; font-family: monospace;">${tune.pctWithin2Cm}%</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </details>
+                        """.trimIndent())
+                    }
+                }
+
+                // 9. CSV Bulk Import Card
+                div(classes = "form-card") {
+                    h3 { +"Bulk Import Validation Tape Data" }
+                    p {
+                        attributes["style"] = "font-size: 13px; color: #64748B; margin-bottom: 12px;"
+                        +"Format: sessionId,attempt,tapeCm,truthFoul[,set] (CSV text or upload)"
+                    }
+                    form(action = "/validation/import", method = kotlinx.html.FormMethod.post) {
+                        div(classes = "form-group") {
+                            label { +"Paste CSV Rows:" }
+                            unsafe {
+                                raw("""<textarea name="csv" rows="5" style="width: 100%; padding: 8px; border: 1px solid #CBD5E1; border-radius: 6px; font-family: monospace; font-size: 12px;" placeholder="ses_01,1,198.5,NONE,REPORT&#10;ses_01,2,201.0,TOES_OVER_LINE,REPORT"></textarea>""")
+                            }
+                        }
+                        button(classes = "btn-primary", type = kotlinx.html.ButtonType.submit) {
+                            +"Import CSV Data"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
+
