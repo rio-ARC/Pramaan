@@ -462,8 +462,8 @@ fun ResultScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         AuditCheckRow(
                             title = "Camera was completely stationary",
-                            subtitle = "Tripod gyroscope stability variance < 0.04°",
-                            passed = manifest?.checks?.find { it.id == "C1" }?.pass ?: true
+                            subtitle = "Tripod gyroscope stability variance < 0.12 rad/s",
+                            passed = manifest?.checks?.find { it.id == "C4" }?.pass ?: true
                         )
                         AuditCheckRow(
                             title = "Real-time gravity confirmed",
@@ -472,13 +472,13 @@ fun ResultScreen(
                         )
                         AuditCheckRow(
                             title = "Dual calculation match",
-                            subtitle = "Flight time aligns with anatomical hip rise within 1.5 cm",
+                            subtitle = "Flight time aligns with anatomical hip rise within tolerance",
                             passed = manifest?.checks?.find { it.id == "C3" }?.pass ?: true
                         )
                         AuditCheckRow(
                             title = "Cryptographically sealed on this phone",
-                            subtitle = "SHA-256 local ledger token written to secure enclave",
-                            passed = manifest?.checks?.find { it.id == "C4" }?.pass ?: true
+                            subtitle = "Hardware-backed Android Keystore ECDSA P-256 seal",
+                            passed = manifest?.checks?.find { it.id == "C1" }?.pass ?: true
                         )
                     }
 

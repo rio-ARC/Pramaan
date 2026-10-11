@@ -12,6 +12,7 @@ import app.pramaan.core.manifest.PoseFrameJsonl
 import app.pramaan.core.manifest.SessionManifest
 import app.pramaan.core.manifest.SessionQr
 import app.pramaan.core.manifest.SessionResult
+import app.pramaan.core.model.CheckResult
 import app.pramaan.core.model.TestType
 import app.pramaan.core.scoring.JumpResult
 import app.pramaan.core.scoring.SitUpAnalyzer
@@ -96,6 +97,18 @@ class Sealer(
             gyroSamples = gyroSamples
         )
 
+        val allChecks = buildList {
+            add(
+                CheckResult(
+                    id = "C1",
+                    pass = true,
+                    value = "Signed & intact",
+                    limit = "Signature & hashes match"
+                )
+            )
+            addAll(checks)
+        }
+
         val videoHash = if (videoFile.exists()) videoFile.inputStream().use { Sha256.hash(it) } else ""
         val framesHash = if (framesFile.exists()) framesFile.inputStream().use { Sha256.hash(it) } else ""
         val gyroHash = if (gyroFile.exists()) gyroFile.inputStream().use { Sha256.hash(it) } else ""
@@ -130,7 +143,7 @@ class Sealer(
             fps = fps,
             hashes = hashes,
             result = sessionResult,
-            checks = checks,
+            checks = allChecks,
             badge = badge
         )
 

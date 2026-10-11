@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GppBad
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -57,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -107,14 +109,22 @@ fun ReviewScreen(
     var rejectReason by remember { mutableStateOf("Retest required: movement execution flawed") }
     var customReason by remember { mutableStateOf("") }
 
-    LaunchedEffect(sessionId) {
-        val result = container.reviewRepository.getSessionDetail(sessionId)
-        if (result.isSuccess) {
-            detail = result.getOrNull()
-        } else {
-            errorMessage = result.exceptionOrNull()?.message ?: "Failed to load session details"
+    val loadDetail: () -> Unit = {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            val result = container.reviewRepository.getSessionDetail(sessionId)
+            if (result.isSuccess) {
+                detail = result.getOrNull()
+            } else {
+                errorMessage = result.exceptionOrNull()?.message ?: "Failed to load session details"
+            }
+            isLoading = false
         }
-        isLoading = false
+    }
+
+    LaunchedEffect(sessionId) {
+        loadDetail()
     }
 
     // ExoPlayer lifecycle
@@ -186,14 +196,54 @@ fun ReviewScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    .padding(24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = errorMessage ?: "Session not found",
-                    color = PramaanError,
-                    style = PramaanTypography.bodyMedium
-                )
+                PramaanCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFFEF3C7),
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Submission Pending Sync",
+                            style = PramaanTypography.titleMedium,
+                            color = PramaanOnSurface,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Text(
+                            text = "The athlete has generated the verification QR code, but the session data is still uploading to the server.",
+                            style = PramaanTypography.bodyMedium,
+                            color = PramaanOnSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+
+                        PramaanButton(
+                            text = "Refresh / Check Again",
+                            onClick = { loadDetail() },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
             return@Scaffold
         }
