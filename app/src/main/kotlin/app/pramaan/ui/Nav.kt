@@ -110,8 +110,10 @@ fun PramaanNavHost(
                 val token = container.authStore.tokenFlow.first()
                 val role = container.authStore.roleFlow.first()
 
+                val isServerConfigured = !serverUrl.isNullOrBlank() && serverUrl != "http://10.0.2.2:8080"
+
                 val dest = when {
-                    serverUrl.isNullOrBlank() -> Routes.CONNECT
+                    !isServerConfigured -> Routes.CONNECT
                     token.isNullOrBlank() -> Routes.WELCOME
                     role == Role.ATHLETE -> Routes.ATHLETE_HOME
                     role == Role.COACH -> Routes.COACH_HOME
@@ -130,17 +132,24 @@ fun PramaanNavHost(
                     navController.navigate(Routes.WELCOME) {
                         popUpTo(Routes.CONNECT) { inclusive = true }
                     }
+                },
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }
 
         composable(Routes.WELCOME) {
             WelcomeScreen(
+                container = container,
                 onSelectAthlete = {
                     navController.navigate(Routes.ATHLETE_REGISTER)
                 },
                 onSelectCoach = {
                     navController.navigate(Routes.COACH_LOGIN)
+                },
+                onChangeServer = {
+                    navController.navigate(Routes.CONNECT)
                 }
             )
         }
@@ -152,6 +161,12 @@ fun PramaanNavHost(
                     navController.navigate(Routes.ATHLETE_HOME) {
                         popUpTo(Routes.WELCOME) { inclusive = true }
                     }
+                },
+                onChangeServer = {
+                    navController.navigate(Routes.CONNECT)
+                },
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }
@@ -163,6 +178,12 @@ fun PramaanNavHost(
                     navController.navigate(Routes.COACH_HOME) {
                         popUpTo(Routes.WELCOME) { inclusive = true }
                     }
+                },
+                onChangeServer = {
+                    navController.navigate(Routes.CONNECT)
+                },
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }

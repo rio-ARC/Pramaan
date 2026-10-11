@@ -26,8 +26,8 @@ class AuthStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    val serverUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_SERVER_URL] ?: DEFAULT_SERVER_URL
+    val serverUrlFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[KEY_SERVER_URL]
     }
 
     val roleFlow: Flow<Role?> = context.dataStore.data.map { prefs ->
@@ -50,7 +50,7 @@ class AuthStore(private val context: Context) {
         }
     }
 
-    suspend fun getServerUrl(): String = serverUrlFlow.first()
+    suspend fun getServerUrl(): String = serverUrlFlow.first() ?: ""
 
     suspend fun getAccountId(): String? = accountIdFlow.first()
 

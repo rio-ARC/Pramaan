@@ -1,6 +1,7 @@
 package app.pramaan.ui.onboarding
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,16 +12,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -38,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pramaan.AppContainer
@@ -47,10 +55,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun ConnectScreen(
     container: AppContainer,
-    onConnected: () -> Unit
+    onConnected: () -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
-    val savedUrl by container.authStore.serverUrlFlow.collectAsState(initial = "http://10.0.2.2:8080")
+    val savedUrl by container.authStore.serverUrlFlow.collectAsState(initial = null)
 
     var urlInput by remember { mutableStateOf("") }
     var isTesting by remember { mutableStateOf(false) }
@@ -59,11 +68,10 @@ fun ConnectScreen(
     var showScanner by remember { mutableStateOf(false) }
 
     LaunchedEffect(savedUrl) {
-        if (urlInput.isEmpty()) {
-            urlInput = savedUrl
-            // Auto-test on first load
+        if (urlInput.isEmpty() && !savedUrl.isNullOrBlank() && savedUrl != "http://10.0.2.2:8080") {
+            urlInput = savedUrl!!
             isTesting = true
-            val res = container.authRepository.testConnection(savedUrl)
+            val res = container.authRepository.testConnection(savedUrl!!)
             isHealthy = res.isSuccess
             isTesting = false
         }
@@ -74,14 +82,20 @@ fun ConnectScreen(
             QrScanner(
                 modifier = Modifier.fillMaxSize(),
                 onQrScanned = { scanned ->
-                    if (scanned.startsWith("http://") || scanned.startsWith("https://")) {
+                    val clean = scanned.trim().trimEnd('/')
+                    if (clean.startsWith("http://") || clean.startsWith("https://")) {
                         showScanner = false
-                        urlInput = scanned
+                        urlInput = clean
                         scope.launch {
                             isTesting = true
-                            val res = container.authRepository.testConnection(scanned)
+                            errorMessage = null
+                            val res = container.authRepository.testConnection(clean)
                             isHealthy = res.isSuccess
-                            errorMessage = if (res.isFailure) res.exceptionOrNull()?.message else null
+                            if (res.isSuccess) {
+                                container.authStore.setServerUrl(clean)
+                            } else {
+                                errorMessage = res.exceptionOrNull()?.message ?: "Connection failed"
+                            }
                             isTesting = false
                         }
                     }
@@ -106,10 +120,34 @@ fun ConnectScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
+            // Optional Back button
+            if (onBack != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF0F172A)
+                        )
+                    }
+                    Text(
+                        text = "Server Configuration",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            } else {
+                Spacer(modifier = Modifier.height(36.dp))
+            }
 
             Box(
                 modifier = Modifier
@@ -126,7 +164,7 @@ fun ConnectScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = "Connect to PRAMAAN",
@@ -141,10 +179,83 @@ fun ConnectScreen(
                 text = "Connect to the laptop verification authority on the same Wi-Fi or Hotspot.",
                 fontSize = 14.sp,
                 color = Color(0xFF64748B),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Primary Action: Prominent Scan QR Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showScanner = true },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEDD5)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEA580C)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = "Scan QR",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Scan Laptop QR Code",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF9A3412)
+                        )
+                        Text(
+                            text = "Point camera at the pairing code on your laptop screen",
+                            fontSize = 13.sp,
+                            color = Color(0xFFC2410C)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(1.dp)
+                        .background(Color(0xFFE2E8F0))
+                )
+                Text(
+                    text = "  OR ENTER IP MANUALLY  ",
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8),
+                    fontWeight = FontWeight.SemiBold
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(1.dp)
+                        .background(Color(0xFFE2E8F0))
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             OutlinedTextField(
                 value = urlInput,
@@ -154,7 +265,7 @@ fun ConnectScreen(
                     errorMessage = null
                 },
                 label = { Text("Server Authority URL") },
-                placeholder = { Text("http://192.168.43.10:8080") },
+                placeholder = { Text("http://192.168.0.103:8080") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
@@ -166,11 +277,14 @@ fun ConnectScreen(
                 Button(
                     onClick = {
                         scope.launch {
+                            val clean = urlInput.trim().trimEnd('/')
                             isTesting = true
                             errorMessage = null
-                            val res = container.authRepository.testConnection(urlInput)
+                            val res = container.authRepository.testConnection(clean)
                             isHealthy = res.isSuccess
-                            if (res.isFailure) {
+                            if (res.isSuccess) {
+                                container.authStore.setServerUrl(clean)
+                            } else {
                                 errorMessage = res.exceptionOrNull()?.message ?: "Connection failed"
                             }
                             isTesting = false
@@ -203,7 +317,7 @@ fun ConnectScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Scan QR")
+                    Text("Scan")
                 }
             }
 
@@ -241,10 +355,18 @@ fun ConnectScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(28.dp))
 
             Button(
-                onClick = onConnected,
+                onClick = {
+                    scope.launch {
+                        val clean = urlInput.trim().trimEnd('/')
+                        if (clean.isNotBlank()) {
+                            container.authStore.setServerUrl(clean)
+                        }
+                        onConnected()
+                    }
+                },
                 enabled = isHealthy,
                 modifier = Modifier
                     .fillMaxWidth()

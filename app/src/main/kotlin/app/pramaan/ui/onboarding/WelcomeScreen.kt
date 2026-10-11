@@ -33,11 +33,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import app.pramaan.AppContainer
+import app.pramaan.auth.AuthStore
+
 @Composable
 fun WelcomeScreen(
+    container: AppContainer,
     onSelectAthlete: () -> Unit,
-    onSelectCoach: () -> Unit
+    onSelectCoach: () -> Unit,
+    onChangeServer: () -> Unit
 ) {
+    val serverUrl by container.authStore.serverUrlFlow.collectAsState(initial = null)
+    val isServerConnected = !serverUrl.isNullOrBlank() && serverUrl != AuthStore.DEFAULT_SERVER_URL
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFFF8FAFC)
@@ -48,7 +58,7 @@ fun WelcomeScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(36.dp))
 
             Box(
                 modifier = Modifier
@@ -65,7 +75,7 @@ fun WelcomeScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = "PRAMAAN",
@@ -82,7 +92,40 @@ fun WelcomeScreen(
                 fontWeight = FontWeight.Medium
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Server Connection Status Pill
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFFF1F5F9))
+                    .clickable { onChangeServer() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isServerConnected) Color(0xFF16A34A) else Color(0xFFDC2626))
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (isServerConnected) "Server: $serverUrl" else "Server Not Configured",
+                    fontSize = 12.sp,
+                    color = Color(0xFF334155),
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (isServerConnected) "Change" else "Scan QR",
+                    fontSize = 12.sp,
+                    color = Color(0xFF2563EB),
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(36.dp))
 
             Text(
                 text = "Choose your role on this device",

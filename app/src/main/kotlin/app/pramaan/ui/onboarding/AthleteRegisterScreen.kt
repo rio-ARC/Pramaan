@@ -55,13 +55,23 @@ import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.Period
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.collectAsState
+
 @Composable
 fun AthleteRegisterScreen(
     container: AppContainer,
-    onRegistered: () -> Unit
+    onRegistered: () -> Unit,
+    onChangeServer: () -> Unit,
+    onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val serverUrl by container.authStore.serverUrlFlow.collectAsState(initial = null)
 
     var name by remember { mutableStateOf("") }
     var dob by remember { mutableStateOf("2010-03-14") }
@@ -114,7 +124,44 @@ fun AthleteRegisterScreen(
                 .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            // Header Row: Back + Server Pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFF0F172A)
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFF1F5F9))
+                        .clickable { onChangeServer() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = null,
+                        tint = Color(0xFF2563EB),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (!serverUrl.isNullOrBlank()) "Server: ${serverUrl!!.take(22)}" else "Scan Server QR",
+                        fontSize = 11.sp,
+                        color = Color(0xFF2563EB),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = "Athlete Registration",
@@ -129,7 +176,7 @@ fun AthleteRegisterScreen(
                 color = Color(0xFF64748B)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Selfie preview
             Box(
@@ -313,6 +360,27 @@ fun AthleteRegisterScreen(
                     color = Color(0xFFDC2626),
                     fontSize = 13.sp
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onChangeServer,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF2563EB))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = null,
+                        tint = Color(0xFF2563EB),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Scan Server QR / Change Server",
+                        color = Color(0xFF2563EB),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
